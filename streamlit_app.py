@@ -596,7 +596,7 @@ with left:
             ai_state.setdefault("conversations", []).append({"role":"assistant","text":reply,"time":datetime.now().isoformat()})
             save_json(STATE_FILE, ai_state)
             incremental_retrain(); train_markov()
-            st.experimental_rerun()
+            st.rerun()
     if c2.button("Complete"):
         ui = user_input.strip()
         if ui:
@@ -604,7 +604,7 @@ with left:
             ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
             ai_state.setdefault("conversations", []).append({"role":"assistant","text":comp,"time":datetime.now().isoformat()})
             save_json(STATE_FILE, ai_state)
-            st.experimental_rerun()
+            st.rerun()
     if c3.button("Teach (word: definition)"):
         ui = user_input.strip()
         m = re.match(r'\s*([^\:]+)\s*[:\-]\s*(.+)', ui)
