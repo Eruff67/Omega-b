@@ -5,16 +5,7 @@
 # ==============================================================
 
 
-# IMPORT GITHUB REPO
 
-
-# END OF GIRHUB IMPORTS
-
-# RETRIEVE SKLEARN MODULE
-
-
-
-# END OF SKLEARN RETRIEVAL
 
 
 # jack_ai_super.py
