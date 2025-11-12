@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 import streamlit as st
 
 # --- Optional imports (handled gracefully if missing) ---
-OCR_AVAILABLE = PDF_AVAILABLE = TTS_AVAILABLE = STT_AVAILABLE = SKLEARN_AVAILABLE = False
+OCR_AVAILABLE = PDF_AVAILABLE = TTS_AVAILABLE = STT_AVAILABLE = SKLEARN_AVAILABLE = True
 try:
     from PIL import Image; import pytesseract; OCR_AVAILABLE = True
 except Exception: pass
@@ -176,7 +176,7 @@ def handle_command(cmd):
 # -------------------------------
 st.set_page_config(page_title="Jack.AI — Offline", layout="wide")
 
-st.sidebar.title("Jack.AI — Control")
+st.sidebar.title("Omega-B Control Panel")
 choice = st.sidebar.radio("Mode", ["💬 Chat", "🧠 Memory", "🖼️ Gallery", "📂 Import/Export", "⚙️ Debug"])
 
 st.sidebar.markdown("---")
