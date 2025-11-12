@@ -4,6 +4,7 @@
 # Run:
 #   pip install streamlit
 #   streamlit run jack_offline_ai.py
+# i think it got broken ;-;
 
 import streamlit as st
 import json
