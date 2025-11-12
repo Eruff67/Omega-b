@@ -1,171 +1,109 @@
-# Jack.AI ASI Offline — Full Auto-Learning, Multi-language, Semantic Memory
-# Fully offline, single-file, copy/paste ready
-# Requirements: pip install scikit-learn nltk pandas numpy langdetect joblib
-
 import os
 import json
-import uuid
-import nltk
-import pandas as pd
-import numpy as np
-from langdetect import detect
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from joblib import dump, load
+import re
+import math
+from datetime import datetime
 
-# ---------------- Setup ----------------
-MEMORY_FILE = "jack_memory.json"
-KB_FILE = "jack_kb.json"
-EMBEDDINGS_FILE = "jack_embeddings.joblib"
-LEARNING_FOLDER = "learning_files"
+# ----- CONFIG -----
+MEMORY_FILE = "memory.json"
+KNOWLEDGE_DIR = "knowledge"  # Folder where text files are stored for AI to learn from
+LANGUAGES = ["english"]  # You can expand with "spanish", "french", etc.
 
-os.makedirs(LEARNING_FOLDER, exist_ok=True)
+# ----- MEMORY HANDLING -----
+if os.path.exists(MEMORY_FILE):
+    with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+        memory = json.load(f)
+else:
+    memory = {"conversations": [], "knowledge": {}}
 
-memory = json.load(open(MEMORY_FILE, "r", encoding="utf-8")) if os.path.exists(MEMORY_FILE) else {"conversations": []}
-kb = json.load(open(KB_FILE, "r", encoding="utf-8")) if os.path.exists(KB_FILE) else {"files": {}}
-embeddings = load(EMBEDDINGS_FILE) if os.path.exists(EMBEDDINGS_FILE) else {"matrix": None, "keys": []}
+def save_memory():
+    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(memory, f, ensure_ascii=False, indent=2)
 
-nltk.download('punkt', quiet=True)
-
-# ---------------- NLP Utilities ----------------
+# ----- TEXT PROCESSING -----
 def tokenize(text):
-    return nltk.word_tokenize(text.lower())
+    """Lowercase and split text into words, remove non-alphanumeric."""
+    return re.findall(r'\b\w+\b', text.lower())
 
-def summarize_text(text, max_sentences=3):
-    sentences = nltk.sent_tokenize(text)
-    if len(sentences) <= max_sentences:
-        return text
-    vectorizer = TfidfVectorizer().fit_transform(sentences)
-    vectors = vectorizer.toarray()
-    scores = np.sum(vectors, axis=1)
-    ranked_sentences = [sentences[i] for i in np.argsort(scores)[::-1][:max_sentences]]
-    return " ".join(ranked_sentences)
-
-def detect_language(text):
-    try:
-        return detect(text)
-    except:
-        return "en"
-
-# ---------------- File Analysis ----------------
-def read_file(path):
-    if not os.path.exists(path):
-        return None, "File not found."
-    if path.endswith((".txt", ".md")):
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read(), None
-    elif path.endswith(".csv"):
-        df = pd.read_csv(path)
-        return df.to_string(), None
-    elif path.endswith(".json"):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.dumps(json.load(f)), None
+def cosine_similarity(vec1, vec2):
+    """Calculate cosine similarity between two term frequency vectors."""
+    intersection = set(vec1.keys()) & set(vec2.keys())
+    numerator = sum([vec1[x] * vec2[x] for x in intersection])
+    sum1 = sum([v**2 for v in vec1.values()])
+    sum2 = sum([v**2 for v in vec2.values()])
+    denominator = math.sqrt(sum1) * math.sqrt(sum2)
+    if not denominator:
+        return 0.0
     else:
-        return None, "Unsupported file type."
+        return numerator / denominator
 
-def learn_file(path):
-    content, error = read_file(path)
-    if error: return error
-    summary = summarize_text(content)
-    kb["files"][path] = {"content": content, "summary": summary}
-    update_embeddings()
-    save_kb()
-    return f"File '{path}' learned successfully."
+def text_to_vector(text):
+    """Convert text to a frequency dictionary of words."""
+    words = tokenize(text)
+    vec = {}
+    for w in words:
+        vec[w] = vec.get(w, 0) + 1
+    return vec
 
-def auto_learn_folder():
-    for file in os.listdir(LEARNING_FOLDER):
-        full_path = os.path.join(LEARNING_FOLDER, file)
-        if file not in kb["files"]:
-            learn_file(full_path)
+# ----- KNOWLEDGE LEARNING -----
+def learn_from_files():
+    if not os.path.exists(KNOWLEDGE_DIR):
+        os.makedirs(KNOWLEDGE_DIR)
+    for fname in os.listdir(KNOWLEDGE_DIR):
+        if fname.endswith(".txt"):
+            path = os.path.join(KNOWLEDGE_DIR, fname)
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+                memory["knowledge"][fname] = text
+    save_memory()
 
-# ---------------- Embeddings ----------------
-def update_embeddings():
-    global embeddings
-    corpus = [kb[f]["content"] for f in kb["files"]]
-    if corpus:
-        vectorizer = TfidfVectorizer().fit(corpus)
-        matrix = vectorizer.transform(corpus).toarray()
-        embeddings = {"matrix": matrix, "keys": list(kb["files"].keys())}
-        dump(embeddings, EMBEDDINGS_FILE)
+# ----- RESPONSE GENERATION -----
+def generate_response(user_input):
+    input_vec = text_to_vector(user_input)
+    best_match = None
+    best_score = 0.0
 
-# ---------------- Math & Logic ----------------
-def solve_math(question):
-    try:
-        allowed = {k: v for k, v in __import__("math").__dict__.items() if not k.startswith("__")}
-        return str(eval(question, {"__builtins__": None}, allowed))
-    except:
-        return "Cannot solve that."
+    # Check memory knowledge
+    for key, text in memory["knowledge"].items():
+        text_vec = text_to_vector(text)
+        score = cosine_similarity(input_vec, text_vec)
+        if score > best_score:
+            best_score = score
+            best_match = text
 
-def logical_reasoning(statement):
-    return f"I analyzed the statement '{statement}', but advanced logic reasoning is under development."
+    # Check previous conversations
+    for convo in memory["conversations"]:
+        text_vec = text_to_vector(convo["user"])
+        score = cosine_similarity(input_vec, text_vec)
+        if score > best_score:
+            best_score = score
+            best_match = convo["assistant"]
 
-# ---------------- AI Response ----------------
-def generate_response(user_input, persona="default"):
-    lang = detect_language(user_input)
-    auto_learn_folder()
-    
-    # Check math
-    if any(c.isdigit() for c in user_input) and any(op in user_input for op in "+-*/()"):
-        return solve_math(user_input), "en"
+    if best_match:
+        response = f"[Learned Info]: {best_match}"
+    else:
+        response = "I am learning. Tell me more!"
 
-    # Check logic
-    if user_input.lower().startswith("/logic"):
-        return logical_reasoning(user_input[len("/logic"):].strip()), "en"
+    # Save to memory
+    memory["conversations"].append({"user": user_input, "assistant": response, "timestamp": str(datetime.now())})
+    save_memory()
+    return response
 
-    # Semantic search
-    base_response = "I don't know yet. Provide a file or more context."
-    if embeddings["matrix"] is not None:
-        vectorizer = TfidfVectorizer().fit([kb[f]["content"] for f in kb["files"]])
-        query_vec = vectorizer.transform([user_input]).toarray()
-        sim = cosine_similarity(query_vec, embeddings["matrix"])
-        best_idx = sim.argmax()
-        if sim[0][best_idx] > 0.1:
-            key = embeddings["keys"][best_idx]
-            base_response = kb[key]["summary"]
-
-    if persona != "default":
-        base_response = f"[{persona} mode] {base_response}"
-
-    return base_response, lang
-
-# ---------------- Save KB ----------------
-def save_kb():
-    json.dump(kb, open(KB_FILE, "w", encoding="utf-8"), indent=2)
-    json.dump(memory, open(MEMORY_FILE, "w", encoding="utf-8"), indent=2)
-
-# ---------------- Main Loop ----------------
+# ----- MAIN LOOP -----
 def main():
-    print("Jack.AI ASI Offline — Full Auto-Learning Multi-language AI")
-    persona = "default"
-
+    print("=== Offline AI (Lightweight Learning) ===")
+    print("Type 'exit' to quit or 'learn' to load knowledge files.")
     while True:
         user_input = input("\nYou: ").strip()
-        if user_input.lower() in ["exit", "quit"]:
-            save_kb()
-            print("Memory saved. Goodbye!")
+        if user_input.lower() == "exit":
+            print("Goodbye!")
             break
-
-        # Commands
-        if user_input.startswith("/persona"):
-            persona = user_input[len("/persona"):].strip() or "default"
-            print(f"Jack: Persona set to '{persona}'.")
-            continue
-
-        if user_input.startswith("/learn"):
-            path = user_input[len("/learn"):].strip()
-            print(f"Jack: {learn_file(path)}")
-            continue
-
-        # Generate response
-        response, lang = generate_response(user_input, persona)
-        print(f"Jack ({lang}): {response}")
-
-        # Update memory
-        memory["conversations"].append({
-            "id": str(uuid.uuid4()),
-            "user": user_input,
-            "assistant": response
-        })
+        elif user_input.lower() == "learn":
+            learn_from_files()
+            print("Knowledge loaded from files.")
+        else:
+            response = generate_response(user_input)
+            print(f"AI: {response}")
 
 if __name__ == "__main__":
     main()
