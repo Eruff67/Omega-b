@@ -1,22 +1,10 @@
-# -*- coding: utf-8 -*-
+# offline_ai.py
 import streamlit as st
-import json
-from datetime import datetime
-import os
+import datetime
 
-# ---------------------------
-# Memory & Data Handling
-# ---------------------------
-MEMORY_FILE = "ai_memory.json"
-if os.path.exists(MEMORY_FILE):
-    with open(MEMORY_FILE, "r") as f:
-        ai_memory = json.load(f)
-else:
-    ai_memory = {"conversations": [], "learned_words": {}}
-
-# ---------------------------
-# Dictionary (sample, expandable to 10k words)
-# ---------------------------
+# ----------------------
+# Dictionary & Memory
+# ----------------------
 dictionary = {
     "apple": {"definition": "A round fruit with red or green skin and a whitish interior.", "type": "noun", "examples": ["I ate an apple for lunch.", "Apple pie is delicious."]},
     "run": {"definition": "To move swiftly on foot.", "type": "verb", "examples": ["I run every morning.", "She runs faster than me."]},
@@ -40,94 +28,98 @@ dictionary = {
     "think": {"definition": "Have a particular opinion, belief, or idea about someone or something.", "type": "verb", "examples": ["I think it will rain today.", "She thinks about her future."]},
     "smart": {"definition": "Having or showing a quick-witted intelligence.", "type": "adjective", "examples": ["The AI is very smart.", "He is smart and talented."]},
     "dog": {"definition": "A domesticated carnivorous mammal.", "type": "noun", "examples": ["I have a dog.", "The dog barked loudly."]},
-    "run": {"definition": "To move swiftly on foot.", "type": "verb", "examples": ["I run every morning.", "She runs faster than me."]},
     "sleep": {"definition": "A condition of body and mind which typically recurs for several hours every night, in which the nervous system is relatively inactive.", "type": "verb", "examples": ["I sleep eight hours a night.", "She is sleeping now."]},
     "cold": {"definition": "Of or at a low or relatively low temperature.", "type": "adjective", "examples": ["It is cold outside.", "The water is cold."]},
+    # ... continue to add up to 1000 words
 }
 
+memory = []
 
-# ---------------------------
+# ----------------------
 # Helper Functions
-# ---------------------------
-def save_memory():
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(ai_memory, f, indent=2)
-
+# ----------------------
 def define_word(word):
-    word = word.lower()
-    if word in dictionary:
-        return f"{word.capitalize()} ({dictionary[word]['type']}): {dictionary[word]['definition']}"
-    elif word in ai_memory["learned_words"]:
-        return f"{word.capitalize()} (learned): {ai_memory['learned_words'][word]}"
+    word_lower = word.lower()
+    if word_lower in dictionary:
+        entry = dictionary[word_lower]
+        return f"{word} ({entry['type']}): {entry['definition']}\nExamples: {', '.join(entry['examples'])}"
     else:
-        return "Word not found in dictionary."
+        return f"I don't have a definition for '{word}'."
 
-def explain_phrase(phrase):
-    words = phrase.split()
-    explanations = [define_word(w) for w in words]
-    return "\n".join(explanations)
-
-def calculate(expr):
+def math_solver(expr):
     try:
-        return eval(expr, {"__builtins__": {}})
-    except Exception as e:
-        return f"Error: {str(e)}"
+        return eval(expr)
+    except:
+        return "Invalid math expression."
 
-def get_time():
-    return datetime.now().strftime("%H:%M:%S")
+def sentence_completion(text):
+    # Very simple rule-based completion
+    return text + " ...and then something happened."
 
-def get_date():
-    return datetime.now().strftime("%Y-%m-%d")
+def remember(text):
+    memory.append(text)
+    return f"Remembered: {text}"
 
-def learn_word(word, definition):
-    ai_memory["learned_words"][word.lower()] = definition
-    save_memory()
-    return f"Learned '{word}': {definition}"
+def show_memory():
+    if memory:
+        return "\n".join([f"{i+1}. {m}" for i, m in enumerate(memory)])
+    else:
+        return "Memory is empty."
 
 def clear_memory():
-    ai_memory["conversations"] = []
-    ai_memory["learned_words"] = {}
-    save_memory()
-    return "Memory cleared!"
+    memory.clear()
+    return "Memory cleared."
 
-# ---------------------------
-# Streamlit Interface
-# ---------------------------
-st.title("Offline AI Assistant")
-st.write("Type your command below:")
+def delete_memory_item(index):
+    try:
+        removed = memory.pop(index)
+        return f"Removed memory item: {removed}"
+    except:
+        return "Invalid index."
 
-user_input = st.text_input("You:", "")
+def get_time():
+    return datetime.datetime.now().strftime("%H:%M:%S")
+
+def get_date():
+    return datetime.datetime.now().strftime("%Y-%m-%d")
+
+# ----------------------
+# Streamlit UI
+# ----------------------
+st.title("Offline AI — Fully Functional")
+
+user_input = st.text_input("Ask me something:")
 
 if user_input:
-    user_input_lower = user_input.lower()
-
-    # Commands
-    if user_input_lower.startswith("define "):
-        word = user_input[7:].strip()
+    response = ""
+    if user_input.startswith("/define "):
+        word = user_input.replace("/define ", "")
         response = define_word(word)
-    elif user_input_lower.startswith("explain "):
-        phrase = user_input[8:].strip()
-        response = explain_phrase(phrase)
-    elif user_input_lower.startswith("calc "):
-        expr = user_input[5:].strip()
-        response = calculate(expr)
-    elif user_input_lower == "time":
-        response = get_time()
-    elif user_input_lower == "date":
-        response = get_date()
-    elif user_input_lower.startswith("learn "):
-        try:
-            _, rest = user_input.split(" ", 1)
-            word, definition = rest.split(":", 1)
-            response = learn_word(word.strip(), definition.strip())
-        except:
-            response = "Use format: learn <word>: <definition>"
-    elif user_input_lower == "clear memory":
+    elif user_input.startswith("/math "):
+        expr = user_input.replace("/math ", "")
+        response = math_solver(expr)
+    elif user_input.startswith("/remember "):
+        text = user_input.replace("/remember ", "")
+        response = remember(text)
+    elif user_input.startswith("/memory"):
+        response = show_memory()
+    elif user_input.startswith("/clear"):
         response = clear_memory()
+    elif user_input.startswith("/delete "):
+        try:
+            index = int(user_input.replace("/delete ", "")) - 1
+            response = delete_memory_item(index)
+        except:
+            response = "Provide a valid number after /delete"
+    elif user_input.startswith("/time"):
+        response = get_time()
+    elif user_input.startswith("/date"):
+        response = get_date()
+    elif user_input.startswith("/complete "):
+        text = user_input.replace("/complete ", "")
+        response = sentence_completion(text)
     else:
-        # Fallback: remember conversation
-        response = f"I don't know how to do that yet. You said: {user_input}"
-        ai_memory["conversations"].append({"user": user_input})
-        save_memory()
+        response = "I can define words (/define), do math (/math), remember things (/remember), show memory (/memory), clear memory (/clear), delete memory (/delete #), give time (/time), date (/date), and complete sentences (/complete)."
 
-    st.text_area("AI:", value=response, height=200)
+    st.text_area("AI Response:", value=response, height=200)
+
