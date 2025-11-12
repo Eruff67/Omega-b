@@ -566,7 +566,7 @@ with right:
                 save_json(STATE_FILE, ai_state)
                 incremental_retrain(); train_markov()
                 st.success("Merged imported state.")
-                st.experimental_rerun()
+               # st.experimental_rerun()
             else:
                 st.error("Imported file not in expected format.")
         except Exception as e:
