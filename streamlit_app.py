@@ -265,7 +265,7 @@ VOCAB = build_vocab()
 NN_MODEL = TinyNN(len(VOCAB), max(32, len(VOCAB)//12), len(INTENTS))
 TRAIN_DATA = build_training(VOCAB)
 if TRAIN_DATA:
-    NN_MODEL.train(TRAIN_DATA, epochs=120, lr=0.06)  # improved initial training
+    NN_MODEL.train(TRAIN_DATA, epochs=30, lr=0.06)  # improved initial training
 
 # Allow incremental retrain when learning new definitions
 def incremental_retrain():
@@ -274,7 +274,7 @@ def incremental_retrain():
     dataset = build_training(VOCAB)
     NN_MODEL = TinyNN(len(VOCAB), max(32, len(VOCAB)//12), len(INTENTS))
     if dataset:
-        NN_MODEL.train(dataset, epochs=80, lr=0.06)
+        NN_MODEL.train(dataset, epochs=20, lr=0.06)
 
 # -------------------------
 # Markov generator for fallback generative replies
