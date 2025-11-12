@@ -384,7 +384,7 @@ def build_and_train_model():
     NN_MODEL = TinyNN(len(VOCAB), max(64, max(16, len(VOCAB)//8)), len(INTENTS))
     dataset = build_training(VOCAB)
     if dataset:
-        NN_MODEL.train(dataset, epochs=160, lr=0.06)
+        NN_MODEL.train(dataset, epochs=50, lr=0.06)
 
 # initialize
 VOCAB: List[str] = []
