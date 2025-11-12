@@ -545,7 +545,7 @@ with right:
             if st.button("Ingest file"):
                 msg = ingest_text_content(uploaded.name, text, save_as_memory=save_as_memory)
                 st.success(msg)
-                st.experimental_rerun()
+                #st.experimental_rerun()
         except Exception as e:
             st.error(f"Failed to read uploaded file: {e}")
 
