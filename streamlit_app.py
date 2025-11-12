@@ -1,10 +1,9 @@
-# jack_offline_ai.py
-# Jack — Offline hybrid GPT-lite + evolving ML classifier with embedded 1,000-word dictionary
+# jack_power_ai.py
+# Jack — Offline "power" AI: Streamlit UI + embedded 1000-word dictionary + from-scratch ML + generative fallback
 # Single-file. Requires only Streamlit.
 # Run:
 #   pip install streamlit
-#   streamlit run jack_offline_ai.py
-# i think it got broken ;-;
+#   streamlit run jack_power_ai.py
 
 import streamlit as st
 import json
@@ -16,11 +15,14 @@ from datetime import datetime
 from typing import List, Dict, Tuple, Any
 
 # -------------------------
-# Persistence
+# Configuration / files
 # -------------------------
 STATE_FILE = "ai_state.json"
-DICT_FILE = "dictionary.json"  # optional to drop in same folder or upload in UI
+DICT_FILE = "dictionary.json"  # optional external dictionary file to drop/merge
 
+# -------------------------
+# Persistence helpers
+# -------------------------
 def load_json(path: str, default):
     try:
         if os.path.exists(path):
@@ -31,40 +33,39 @@ def load_json(path: str, default):
     return default
 
 def save_json(path: str, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("Save failed:", e)
 
-# initialize state
-ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "model": {}, "settings": {}})
+# Load persistent state (conversations, learned, model meta)
+ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings": {}, "model_meta": {}})
 
 # -------------------------
-# Embedded 1,000-word starter dictionary (templated definitions & examples)
+# Build embedded 1000-word dictionary programmatically
 # -------------------------
-# For practicality we generate 1000 common-ish words and template definitions/examples.
-# Important special entries (facts) are explicitly defined below.
-EMBED_WORDS = [
-    # A compact generated list of 1000 tokens: base common words, numbers, days, common verbs/adjectives etc.
-    # To keep the file readable we programmatically create a list using common groups.
-]
-
-# Build EMBED_WORDS by combining common word lists programmatically
-_common = """the be to of and a in that have I it for not on with he as you do at this but his by from they we say her she or an will my one all would there their what so up out if about who get which go me when make can like time no just him know take people into year your good some could them see other than then now look only come its over think also back after use two how our work first well way even new want because any these give day most us""".split()
+# We'll combine common words, days, numbers, colors, verbs, nouns, adjectives, and an "extra" set,
+# then fill up to 1000 tokens with synthetic tokens (wordNN) to reach target.
+_common = """the be to of and a in that have i it for not on with he as you do at this but his by from they we say her she or will my one all would there their what so up out if about who get which go me when make can like time no just him know take people into year your good some could them see other than then now look only come its over think also back after use two how our work first well way even new want because any these give day most us""".split()
 _days = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]
-_nums = [str(i) for i in range(0,51)]
+_nums = [str(i) for i in range(0,101)]
 _colors = ["red","blue","green","yellow","black","white","gray","purple","orange","pink","brown"]
-_more_verbs = ["run","walk","speak","talk","write","read","learn","teach","play","eat","drink","sleep","drive","open","close","buy","sell","build","create","think","feel","see","watch","listen","ask","answer"]
-_more_nouns = ["apple","computer","city","country","car","house","book","music","movie","dog","cat","water","food","friend","family","school","teacher","student","money","game","story","science","history","phone","table","chair"]
+_more_verbs = ["run","walk","speak","talk","write","read","learn","teach","play","eat","drink","sleep","drive","open","close","buy","sell","build","create","think","feel","see","watch","listen","ask","answer","help","love","hate","start","stop"]
+_more_nouns = ["apple","computer","city","country","car","house","book","music","movie","dog","cat","water","food","friend","family","school","teacher","student","money","game","story","science","history","phone","table","chair","garden","ocean","river"]
 _adj = ["good","bad","new","old","young","large","small","short","long","fast","slow","happy","sad","angry","beautiful","ugly","easy","hard","strong","weak","hot","cold","warm","cool"]
-_extra = ["google","amazon","facebook","twitter","github","linux","windows","macos","ubuntu","kernel","python","java","javascript","html","css","sql","data","model","ai","ml"]
+_extra = ["google","amazon","facebook","twitter","github","linux","windows","macos","ubuntu","kernel","python","java","javascript","html","css","sql","data","model","ai","ml","neural","network"]
 
-# assemble into list ensuring uniqueness
+# assemble into embed list
 seen = set()
-EMBED_WORDS = []
-for group in (_common + _days + _nums + _colors + _more_verbs + _more_nouns + _adj + _extra):
-    if group not in seen:
-        EMBED_WORDS.append(group)
-        seen.add(group)
-# extend to ~1000 by creating synthetic entries if needed
+EMBED_WORDS: List[str] = []
+for token in (_common + _days + _nums + _colors + _more_verbs + _more_nouns + _adj + _extra):
+    t = token.lower()
+    if t not in seen:
+        EMBED_WORDS.append(t)
+        seen.add(t)
+
+# synthetic tokens to reach 1000
 i = 1
 while len(EMBED_WORDS) < 1000:
     token = f"word{i}"
@@ -73,35 +74,26 @@ while len(EMBED_WORDS) < 1000:
         seen.add(token)
     i += 1
 
-# Now create DICTIONARY entries programmatically
+# Create templated DICTIONARY entries
 DICTIONARY: Dict[str, Dict[str, Any]] = {}
 
-# Important human facts / knowledge entries (explicit, not templated)
+# Explicit high-quality factual entries to help answers
 DICTIONARY["george washington"] = {
-    "definition":"The first President of the United States, serving from 1789 to 1797.",
-    "type":"proper_noun",
-    "examples":["George Washington led the Continental Army to victory during the American Revolutionary War."]
+    "definition": "The first President of the United States, serving from 1789 to 1797.",
+    "type": "proper_noun",
+    "examples": ["George Washington led the Continental Army during the American Revolutionary War."]
 }
 DICTIONARY["abraham lincoln"] = {
-    "definition":"The 16th President of the United States, who led the country through the Civil War.",
-    "type":"proper_noun",
-    "examples":["Abraham Lincoln issued the Emancipation Proclamation in 1863."]
+    "definition": "The 16th President of the United States who led the nation through the Civil War.",
+    "type": "proper_noun",
+    "examples": ["Abraham Lincoln signed the Emancipation Proclamation in 1863."]
 }
-DICTIONARY["pi"] = {
-    "definition":"Mathematical constant π, the ratio of a circle's circumference to its diameter (≈ 3.14159).",
-    "type":"number",
-    "examples":["Pi is approximately 3.14159."]
-}
-DICTIONARY["python"] = {
-    "definition":"A high-level programming language widely used for scripting, data science, and web development.",
-    "type":"noun",
-    "examples":["I wrote a small script in Python."]
-}
-# Add a few more factual KB items in the DICTIONARY to help Q&A
-DICTIONARY["paris"] = {"definition":"Capital city of France.", "type":"proper_noun", "examples":["Paris is known for the Eiffel Tower."]}
-DICTIONARY["jupiter"] = {"definition":"The largest planet in the Solar System.", "type":"noun", "examples":["Jupiter has a large red spot."]}
+DICTIONARY["paris"] = {"definition":"Capital of France.", "type":"proper_noun", "examples":["Paris is known for the Eiffel Tower."]}
+DICTIONARY["jupiter"] = {"definition":"The largest planet in the Solar System.", "type":"noun", "examples":["Jupiter is a gas giant."]}
+DICTIONARY["pi"] = {"definition":"Mathematical constant π, the ratio of a circle's circumference to its diameter, ≈ 3.14159.", "type":"number", "examples":["Pi ≈ 3.14159."]}
+DICTIONARY["python"] = {"definition":"A high-level programming language popular for scripting and data science.", "type":"noun", "examples":["I used Python to write this script."]}
 
-# Templated fill for the remainder of EMBED_WORDS if not already defined
+# Fill rest with templated entries
 for w in EMBED_WORDS:
     key = w.lower()
     if key in DICTIONARY:
@@ -109,11 +101,17 @@ for w in EMBED_WORDS:
     DICTIONARY[key] = {
         "definition": f"A common English word: '{key}'.",
         "type": "common",
-        "examples": [f"Example usage of '{key}' in a sentence."]
+        "examples": [f"This is an example sentence using '{key}'."]
     }
 
+# Merge external DICTIONARY file if present at startup
+external = load_json(DICT_FILE, None)
+if external and isinstance(external, dict):
+    for k,v in external.items():
+        DICTIONARY[k.lower()] = v
+
 # -------------------------
-# Small knowledge base for direct Q/A (explicit strings)
+# Small deterministic knowledge base (KB) for direct Q/A
 # -------------------------
 KB: Dict[str, str] = {
     "who was the first president of the united states": "George Washington",
@@ -126,7 +124,7 @@ KB: Dict[str, str] = {
 }
 
 # -------------------------
-# Tokenization & vocab builder
+# Tokenization / vocab builder
 # -------------------------
 WORD_RE = re.compile(r"[a-zA-Z']+")
 
@@ -135,7 +133,7 @@ def tokenize(text: str) -> List[str]:
 
 def build_vocab() -> List[str]:
     vocab = set()
-    # include dictionary keys, definitions, examples
+    # dictionary keys, definitions, examples
     for k,v in DICTIONARY.items():
         vocab.update(tokenize(k))
         vocab.update(tokenize(v.get("definition","")))
@@ -144,8 +142,8 @@ def build_vocab() -> List[str]:
     # conversation tokens
     for c in ai_state.get("conversations", [])[-500:]:
         vocab.update(tokenize(c.get("text","")))
-    # safety add a few tokens
-    vocab.update(["what","is","who","define","means","calculate","time","date","how","why","when","where"])
+    # safety tokens
+    vocab.update(["what","is","who","define","means","calculate","time","date","how","why","when","where","math"])
     return sorted(vocab)
 
 def text_to_vector(text: str, vocab_list: List[str]) -> List[float]:
@@ -159,7 +157,7 @@ def text_to_vector(text: str, vocab_list: List[str]) -> List[float]:
     return [x/norm for x in vec]
 
 # -------------------------
-# Simple NN (single hidden layer) — from scratch
+# Tiny neural network (from-scratch)
 # -------------------------
 def random_matrix(rows, cols, scale=0.1):
     return [[(random.random()*2-1)*scale for _ in range(cols)] for _ in range(rows)]
@@ -184,9 +182,9 @@ class TinyNN:
         self.in_dim = input_dim
         self.h_dim = hidden_dim
         self.out_dim = output_dim
-        self.W1 = random_matrix(hidden_dim, input_dim, scale=0.2)
+        self.W1 = random_matrix(hidden_dim, input_dim, scale=0.25)
         self.b1 = [0.0]*hidden_dim
-        self.W2 = random_matrix(output_dim, hidden_dim, scale=0.2)
+        self.W2 = random_matrix(output_dim, hidden_dim, scale=0.25)
         self.b2 = [0.0]*output_dim
 
     def forward(self, x: List[float]) -> Tuple[List[float], List[float]]:
@@ -200,28 +198,29 @@ class TinyNN:
         _, out = self.forward(x)
         return max(range(len(out)), key=lambda i: out[i])
 
-    def train(self, dataset: List[Tuple[List[float], int]], epochs:int=50, lr:float=0.05):
-        for _ in range(epochs):
+    def train(self, dataset: List[Tuple[List[float], int]], epochs:int=60, lr:float=0.05):
+        for epoch in range(epochs):
             random.shuffle(dataset)
             for x_vec, label in dataset:
+                # forward
                 h_in = add_vec(matvec(self.W1, x_vec), self.b1)
                 h = tanh_vec(h_in)
                 o_in = add_vec(matvec(self.W2, h), self.b2)
                 out = softmax(o_in)
-                # target
-                y = [0.0]*len(out); y[label]=1.0
-                err_out = [out[i]-y[i] for i in range(len(out))]
+                # one-hot target
+                y = [0.0]*len(out); y[label] = 1.0
+                err_out = [out[i] - y[i] for i in range(len(out))]
                 # update W2,b2
                 for i in range(len(self.W2)):
                     for j in range(len(self.W2[0])):
                         self.W2[i][j] -= lr * err_out[i] * h[j]
                     self.b2[i] -= lr * err_out[i]
-                # backprop to hidden
+                # backprop hidden
                 err_hidden = [0.0]*len(h)
                 for j in range(len(h)):
                     s = 0.0
                     for i in range(len(err_out)):
-                        s += self.W2[i][j]*err_out[i]
+                        s += self.W2[i][j] * err_out[i]
                     err_hidden[j] = s * (1.0 - h[j]*h[j])
                 # update W1,b1
                 for j in range(len(self.W1)):
@@ -230,7 +229,7 @@ class TinyNN:
                     self.b1[j] -= lr * err_hidden[j]
 
 # -------------------------
-# Intents, seed data, and training loop improvements
+# Intents and seed data
 # -------------------------
 INTENTS = ["define","fact","math","time","date","teach","chat"]
 SEED_EXAMPLES = [
@@ -252,32 +251,14 @@ SEED_EXAMPLES = [
 def build_training(vocab: List[str]) -> List[Tuple[List[float], int]]:
     data = []
     for text, intent in SEED_EXAMPLES:
-        vec = text_to_vector(text, vocab)
-        data.append((vec, INTENTS.index(intent)))
-    # incorporate learned definitions as additional "teach" examples
+        data.append((text_to_vector(text, vocab), INTENTS.index(intent)))
     for k,v in ai_state.get("learned", {}).items():
         phrase = f"{k} means {v.get('definition','')}"
         data.append((text_to_vector(phrase, vocab), INTENTS.index("teach")))
     return data
 
-# Build initial vocab and model
-VOCAB = build_vocab()
-NN_MODEL = TinyNN(len(VOCAB), max(32, len(VOCAB)//12), len(INTENTS))
-TRAIN_DATA = build_training(VOCAB)
-if TRAIN_DATA:
-    NN_MODEL.train(TRAIN_DATA, epochs=30, lr=0.06)  # improved initial training
-
-# Allow incremental retrain when learning new definitions
-def incremental_retrain():
-    global VOCAB, NN_MODEL
-    VOCAB = build_vocab()
-    dataset = build_training(VOCAB)
-    NN_MODEL = TinyNN(len(VOCAB), max(32, len(VOCAB)//12), len(INTENTS))
-    if dataset:
-        NN_MODEL.train(dataset, epochs=20, lr=0.06)
-
 # -------------------------
-# Markov generator for fallback generative replies
+# Markov generator for fallback generation
 # -------------------------
 class Markov:
     def __init__(self):
@@ -332,10 +313,11 @@ def train_markov():
     for c in ai_state.get("conversations", []):
         MARKOV.train(c.get("text",""))
 
+# initial markov train
 train_markov()
 
 # -------------------------
-# Retrieval helpers & lookup
+# Retrieval / KB helpers
 # -------------------------
 LEARN_PATTERNS = [
     re.compile(r'^\s*define\s+([^\:]+)\s*[:\-]\s*(.+)$', re.I),
@@ -375,9 +357,8 @@ def retrieve_from_memory_or_learned(query: str) -> str:
         return best_text
     return None
 
-def lookup_kb(query: str) -> Tuple[Any, float]:
+def lookup_kb(query: str) -> Tuple[Any,float]:
     q = normalize_key(query.strip("? "))
-    # exact KB match
     if q in KB:
         return KB[q], 0.95
     qtokens = set(tokenize(q))
@@ -388,30 +369,69 @@ def lookup_kb(query: str) -> Tuple[Any, float]:
             best_score = sc; best = v
     if best_score >= 1:
         return best, 0.7
-    # check learned as facts
+    # learned definitions as facts
     for k,v in ai_state.get("learned", {}).items():
         if normalize_key(k) in q or normalize_key(q) in k:
             return v.get("definition",""), 0.85
     return None, 0.0
 
 # -------------------------
-# Core reply composition
+# Build initial vocab and model (heavy initial training for power)
 # -------------------------
-def format_definition(key: str, entry: Dict[str, Any]) -> str:
+def build_and_train_model():
+    global VOCAB, NN_MODEL
+    VOCAB = build_vocab()
+    NN_MODEL = TinyNN(len(VOCAB), max(64, max(16, len(VOCAB)//8)), len(INTENTS))
+    dataset = build_training(VOCAB)
+    if dataset:
+        NN_MODEL.train(dataset, epochs=160, lr=0.06)
+
+# initialize
+VOCAB: List[str] = []
+NN_MODEL: TinyNN = None
+build_and_train_model()
+
+# incremental retrain helper
+def incremental_retrain():
+    # rebuild vocabulary and retrain with reasonable epochs
+    build_and_train_model()
+
+# -------------------------
+# Compose reply (core)
+# -------------------------
+def format_definition(key: str, entry: Dict[str,Any]) -> str:
     ex = entry.get("examples", [])
     ex_text = ("\nExamples:\n - " + "\n - ".join(ex)) if ex else ""
     return f"**{key}** ({entry.get('type','')}): {entry.get('definition','')}{ex_text}"
+
+def safe_eval_math(expr: str):
+    # restrict characters and evaluate simple expression
+    try:
+        filtered = re.sub(r"[^0-9\.\+\-\*\/\%\(\)\s\^]", "", expr)
+        if not re.search(r"\d", filtered):
+            return None
+        filtered = filtered.replace("^", "**")
+        result = eval(filtered, {"__builtins__": None}, {"math": math, **{k:getattr(math,k) for k in dir(math) if not k.startswith("_")}})
+        return result
+    except Exception:
+        return None
 
 def compose_reply(user_text: str) -> Dict[str,Any]:
     user = user_text.strip()
     lower = user.lower()
 
     # commands
-    if lower in ("/clear", "clear memory", "wipe memory"):
-        ai_state["conversations"].clear(); ai_state["learned"].clear()
+    if lower in ("/clear", "clear chat"):
+        ai_state["conversations"].clear()
+        save_json(STATE_FILE, ai_state)
+        train_markov()
+        return {"reply":"Chat cleared.", "meta":{"intent":"memory"}}
+
+    if lower in ("/forget", "forget"):
+        ai_state["learned"].clear()
         save_json(STATE_FILE, ai_state)
         incremental_retrain(); train_markov()
-        return {"reply":"Memory and learned definitions cleared.", "meta":{"intent":"memory"}}
+        return {"reply":"Learned items forgotten.", "meta":{"intent":"memory"}}
 
     if lower.startswith("/delete "):
         arg = lower[len("/delete "):].strip()
@@ -433,23 +453,18 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
             else:
                 return {"reply": f"No learned definition for '{key}'.", "meta":{"intent":"error"}}
 
-    # math detection (safe subset)
-    math_expr = re.sub(r"[^0-9\.\+\-\*\/\%\(\)\s\^]", "", user)
-    if any(op in math_expr for op in "+-*/%") and re.search(r"\d", math_expr):
-        try:
-            expr = math_expr.replace("^", "**")
-            res = eval(expr, {"__builtins__": None}, {"math": math, **{k:getattr(math,k) for k in dir(math) if not k.startswith("_")}})
-            return {"reply": f"Math result: {res}", "meta":{"intent":"math"}}
-        except Exception:
-            pass
+    # safe math
+    math_res = safe_eval_math(user)
+    if math_res is not None:
+        return {"reply": f"Math result: {math_res}", "meta":{"intent":"math"}}
 
-    # time/date checks
+    # time/date
     if re.search(r"\bwhat(?:'s| is)? the time\b|\btime now\b|\bcurrent time\b", lower):
         return {"reply": f"The current time is {datetime.now().strftime('%H:%M:%S')}", "meta":{"intent":"time"}}
     if re.search(r"\bwhat(?:'s| is)? the date\b|\bcurrent date\b|\bdate today\b", lower):
         return {"reply": f"Today's date is {datetime.now().strftime('%Y-%m-%d')}", "meta":{"intent":"date"}}
 
-    # explicit define command
+    # explicit define
     if lower.startswith("/define ") or lower.startswith("define "):
         rest = user.split(None,1)[1] if len(user.split(None,1))>1 else ""
         m = re.match(r'\s*([^\:]+)\s*[:\-]\s*(.+)', rest)
@@ -459,35 +474,35 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
             save_json(STATE_FILE, ai_state)
             incremental_retrain(); train_markov()
             return {"reply": f"Learned definition for '{w}'.", "meta":{"intent":"learning"}}
-        # if single word define e.g. "define apple"
-        m2 = re.match(r'\s*([A-Za-z\'\-]+)\s*$', rest)
+        m2 = re.match(r'\s*([A-Za-z\'\- ]+)\s*$', rest)
         if m2:
             key = normalize_key(m2.group(1))
             defs = merged_dictionary()
             if key in defs:
                 return {"reply": format_definition(key, defs[key]), "meta":{"intent":"definition"}}
             else:
-                return {"reply": f"No definition found for '{key}'. Teach with '/define {key}: ...'", "meta":{"intent":"definition"}}
+                return {"reply": f"No definition for '{key}'. Use '/define {key}: <meaning>' to teach me.", "meta":{"intent":"define"}}
         return {"reply":"Usage: /define word: definition", "meta":{"intent":"define"}}
 
     # natural teaching patterns
-    w,d = try_extract_definition(user)
+    w, d = try_extract_definition(user)
     if w and d:
         ai_state.setdefault("learned", {})[w] = {"definition": d, "type":"learned", "examples": []}
         save_json(STATE_FILE, ai_state)
         incremental_retrain(); train_markov()
-        return {"reply": f"Understood — saved '{w}' = {d}", "meta":{"intent":"learning"}}
+        return {"reply": f"Saved learned definition: '{w}' = {d}", "meta":{"intent":"learning"}}
 
-    # intent classification via NN
-    x = text_to_vector(user, VOCAB)
-    intent_idx = NN_MODEL.predict(x)
+    # classification
+    xvec = text_to_vector(user, VOCAB)
+    intent_idx = NN_MODEL.predict(xvec)
     intent = INTENTS[intent_idx]
 
-    # intent-driven behavior
+    # intent handling
     if intent == "fact":
         ans, conf = lookup_kb(user)
         if ans:
             return {"reply": str(ans), "meta":{"intent":"fact","confidence":conf}}
+
     if intent == "define":
         key = normalize_key(user)
         defs = merged_dictionary()
@@ -498,47 +513,48 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
             k = normalize_key(m.group(1))
             if k in defs:
                 return {"reply": format_definition(k, defs[k]), "meta":{"intent":"definition"}}
-        return {"reply":"I don't have that definition yet. Teach me: '/define word: definition' or say 'X means Y'.", "meta":{"intent":"definition"}}
+        return {"reply": "I don't have that definition. Teach me with '/define word: meaning' or 'X means Y'.", "meta":{"intent":"definition"}}
+
     if intent == "time":
         return {"reply": f"The current time is {datetime.now().strftime('%H:%M:%S')}", "meta":{"intent":"time"}}
     if intent == "date":
         return {"reply": f"Today's date is {datetime.now().strftime('%Y-%m-%d')}", "meta":{"intent":"date"}}
     if intent == "math":
-        math_expr = re.sub(r"[^0-9\.\+\-\*\/\%\(\)\s\^]", "", user)
-        try:
-            expr = math_expr.replace("^","**")
-            res = eval(expr, {"__builtins__": None}, {"math": math, **{k:getattr(math,k) for k in dir(math) if not k.startswith("_")}})
-            return {"reply": f"Math result: {res}", "meta":{"intent":"math"}}
-        except Exception:
-            pass
+        if math_res is not None:
+            return {"reply": f"Math result: {math_res}", "meta":{"intent":"math"}}
 
     # retrieval
     mem = retrieve_from_memory_or_learned(user)
     if mem:
         return {"reply": mem, "meta":{"intent":"memory"}}
 
-    # markov generation fallback
-    gen = MARKOV.generate(seed=user, max_words=40)
+    # generative fallback
+    gen = MARKOV.generate(seed=user, max_words=50)
     if gen:
         return {"reply": gen.capitalize() + ".", "meta":{"intent":"gen"}}
 
-    return {"reply":"I don't know that yet. You can teach me with 'X means Y' or '/define X: Y'.", "meta":{"intent":"unknown"}}
+    return {"reply":"I don't know that yet. Teach me: '/define X: Y' or say 'X means Y'.", "meta":{"intent":"unknown"}}
+
+def merged_dictionary() -> Dict[str, Dict[str,Any]]:
+    d = {**DICTIONARY}
+    for k,v in ai_state.get("learned", {}).items():
+        d[k.lower()] = {"definition": v.get("definition",""), "type": v.get("type","learned"), "examples": v.get("examples",[])}
+    return d
 
 # -------------------------
-# Streamlit UI
+# UI: Streamlit Chat Interface
 # -------------------------
-st.set_page_config(page_title="Jack — 1,000-word Embedded Offline AI", layout="wide")
-st.title("Jack — Offline Hybrid GPT-lite + ML (1,000-word dictionary)")
+st.set_page_config(page_title="Jack — Power Offline AI", layout="wide")
+st.title("Jack — Power Offline AI (Embedded 1,000-word dictionary)")
 
 left, right = st.columns([3,1])
 
 with right:
     st.header("Controls")
-    if st.button("Clear memory & learned"):
-        ai_state["conversations"].clear(); ai_state["learned"].clear()
-        save_json(STATE_FILE, ai_state)
-        incremental_retrain(); train_markov()
-        st.success("Cleared.")
+    if st.button("Clear chat"):
+        ai_state["conversations"].clear(); save_json(STATE_FILE, ai_state); st.experimental_rerun()
+    if st.button("Forget learned"):
+        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); incremental_retrain(); train_markov(); st.success("Forgot learned items.")
     if st.button("Export state"):
         st.download_button("Download ai_state.json", data=json.dumps(ai_state, ensure_ascii=False, indent=2), file_name="ai_state.json")
     uploaded = st.file_uploader("Upload dictionary.json (merge)", type=["json"])
@@ -551,20 +567,21 @@ with right:
                 st.success("Merged uploaded dictionary.")
                 incremental_retrain(); train_markov()
             else:
-                st.error("dictionary.json must be an object")
+                st.error("dictionary.json must be an object mapping words to definitions.")
         except Exception as e:
             st.error(f"Failed to load dictionary: {e}")
 
 with left:
     st.subheader("Conversation")
-    # display history
-    for msg in ai_state.get("conversations", [])[-300:]:
-        who = "You" if msg.get("role","user")=="user" else "Jack"
-        t = msg.get("time","")
+    # conversation area
+    history = ai_state.get("conversations", [])
+    for m in history[-300:]:
+        who = "You" if m.get("role","user")=="user" else "Jack"
+        t = m.get("time","")
         st.markdown(f"**{who}**  <span style='color:gray;font-size:12px'>{t}</span>", unsafe_allow_html=True)
-        st.write(msg.get("text",""))
+        st.write(m.get("text",""))
 
-    user_input = st.text_area("Message (Shift+Enter new line)", height=140)
+    user_input = st.text_area("Type your message (Shift+Enter = newline)", height=140)
     c1, c2, c3 = st.columns([1,1,1])
     if c1.button("Send"):
         ui = user_input.strip()
@@ -595,10 +612,18 @@ with left:
             st.success(f"Learned '{w}'.")
             st.experimental_rerun()
         else:
-            st.warning("To teach: word: definition (e.g. gravity: force that pulls)")
+            st.warning("To teach: use 'word: definition' (e.g. gravity: a force)")
 
 st.markdown("---")
-st.markdown("**Examples:** Ask `Who was the first president of the U.S.?`, `12 * (3 + 4)`, `define gravity`, or teach `gravity means a force`.")
+st.markdown("**Usage examples:**")
+st.markdown(
+"""
+- Ask: `Who was the first president of the U.S.?`  
+- Math: `12 * (3 + 4)`  
+- Define: `/define gravity: a force that attracts` or teach with `gravity means a force`  
+- Commands: `/clear` (clear chat), `/forget` (clear learned), `/delete N` (delete conv N)
+"""
+)
 
 # End of file
 
