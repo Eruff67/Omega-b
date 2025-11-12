@@ -496,6 +496,4 @@ if tab == "Chat":
                 persist_all()
                 st.experimental_rerun()
             # slash commands
-            elif text.startswith("/"):
-               
-            }
+            elif text.startswith("/");
