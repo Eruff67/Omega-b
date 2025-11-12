@@ -499,13 +499,13 @@ with right:
         ai_state["conversations"].clear()
         save_json(STATE_FILE, ai_state)
         st.success("Conversation cleared.")
-        st.experimental_rerun()
+        #st.experimental_rerun()
     if st.button("Forget Learned Memories"):
         ai_state["learned"].clear()
         save_json(STATE_FILE, ai_state)
         incremental_retrain(); train_markov()
         st.success("All learned memories forgotten.")
-        st.experimental_rerun()
+     #   st.experimental_rerun()
     st.markdown("---")
     st.markdown("**Manage Learned**")
     # list learned items with delete buttons
@@ -520,7 +520,7 @@ with right:
                     ai_state["learned"].pop(k, None)
                     save_json(STATE_FILE, ai_state)
                     incremental_retrain(); train_markov()
-                    st.experimental_rerun()
+                    #st.experimental_rerun()
     else:
         st.write("_No learned items yet._")
 
@@ -545,7 +545,7 @@ with right:
             if st.button("Ingest file"):
                 msg = ingest_text_content(uploaded.name, text, save_as_memory=save_as_memory)
                 st.success(msg)
-                st.experimental_rerun()
+                #st.experimental_rerun()
         except Exception as e:
             st.error(f"Failed to read uploaded file: {e}")
 
@@ -566,7 +566,7 @@ with right:
                 save_json(STATE_FILE, ai_state)
                 incremental_retrain(); train_markov()
                 st.success("Merged imported state.")
-                st.experimental_rerun()
+                #st.experimental_rerun()
             else:
                 st.error("Imported file not in expected format.")
         except Exception as e:
@@ -596,7 +596,7 @@ with left:
             ai_state.setdefault("conversations", []).append({"role":"assistant","text":reply,"time":datetime.now().isoformat()})
             save_json(STATE_FILE, ai_state)
             incremental_retrain(); train_markov()
-            st.experimental_rerun()
+            #st.experimental_rerun()
     if c2.button("Complete"):
         ui = user_input.strip()
         if ui:
@@ -604,7 +604,7 @@ with left:
             ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
             ai_state.setdefault("conversations", []).append({"role":"assistant","text":comp,"time":datetime.now().isoformat()})
             save_json(STATE_FILE, ai_state)
-            st.experimental_rerun()
+            #st.experimental_rerun()
     if c3.button("Teach (word: definition)"):
         ui = user_input.strip()
         m = re.match(r'\s*([^\:]+)\s*[:\-]\s*(.+)', ui)
@@ -614,7 +614,7 @@ with left:
             save_json(STATE_FILE, ai_state)
             incremental_retrain(); train_markov()
             st.success(f"Learned '{w}'.")
-            st.experimental_rerun()
+            #st.experimental_rerun()
         else:
             st.warning("To teach: enter `word: definition` (e.g. gravity: a force that pulls)")
 
