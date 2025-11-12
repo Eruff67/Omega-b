@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 import streamlit as st
 
 # --- Optional imports (handled gracefully if missing) ---
-OCR_AVAILABLE = PDF_AVAILABLE = TTS_AVAILABLE = STT_AVAILABLE = SKLEARN_AVAILABLE = True
+OCR_AVAILABLE = PDF_AVAILABLE = TTS_AVAILABLE = STT_AVAILABLE = SKLEARN_AVAILABLE = False
 try:
     from PIL import Image; import pytesseract; OCR_AVAILABLE = True
 except Exception: pass
