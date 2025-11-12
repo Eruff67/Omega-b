@@ -1,175 +1,276 @@
+# ==============================================================
+# Jack.AI — Super Offline Edition
+# Personal Property (© You)
+# Single-file, offline Streamlit app
+# ==============================================================
 
-
-# jack_ai_super.py
-# Jack.AI — Super Full (Python Streamlit version)
-# Full local version: chat, OCR, PDF extraction, persona memory, mini model
-
-import os, json, time, random
+import os, sys, json, time, random, threading
 from datetime import datetime
+from io import BytesIO
+from typing import List, Dict, Any, Optional
 import streamlit as st
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LinearRegression
-import pyttsx3
-import pytesseract
-from PIL import Image
-import fitz  # PyMuPDF
-import speech_recognition as sr
+
+# --- Optional imports (handled gracefully if missing) ---
+OCR_AVAILABLE = PDF_AVAILABLE = TTS_AVAILABLE = STT_AVAILABLE = SKLEARN_AVAILABLE = False
+try:
+    from PIL import Image; import pytesseract; OCR_AVAILABLE = True
+except Exception: pass
+try:
+    import fitz; PDF_AVAILABLE = True  # PyMuPDF
+except Exception: pass
+try:
+    import pyttsx3; TTS_AVAILABLE = True
+except Exception: pass
+try:
+    import speech_recognition as sr; STT_AVAILABLE = True
+except Exception: pass
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.linear_model import LinearRegression
+    import numpy as np; SKLEARN_AVAILABLE = True
+except Exception: pass
 
 # -------------------------------
-# Persistent storage
+# Directories and files
 # -------------------------------
-DATA_DIR = "jack_data"
+DATA_DIR = os.path.join(os.getcwd(), "jack_data")
 os.makedirs(DATA_DIR, exist_ok=True)
+FILES = {
+    "chat": "chat.json",
+    "mem": "memories.json",
+    "persona": "persona.json",
+    "tiny": "tiny_model.json",
+    "gallery": "gallery.json",
+}
 
-def load_json(name, fallback):
-    path = os.path.join(DATA_DIR, f"{name}.json")
-    if os.path.exists(path):
+def file_path(key): return os.path.join(DATA_DIR, FILES[key])
+
+def load_json(key, fallback):
+    p = file_path(key)
+    if os.path.exists(p):
         try:
-            return json.load(open(path))
-        except:
-            return fallback
+            with open(p, "r", encoding="utf-8") as f: return json.load(f)
+        except Exception: return fallback
     return fallback
 
-def save_json(name, data):
-    path = os.path.join(DATA_DIR, f"{name}.json")
-    json.dump(data, open(path, "w"), indent=2)
-
-chat = load_json("chat", [])
-memories = load_json("memories", [])
-examples = load_json("examples", [])
-persona = load_json("persona", {"name": "Jack", "system_prompt": "You are Jack, a witty assistant."})
+def save_json(key, data):
+    with open(file_path(key), "w", encoding="utf-8") as f: json.dump(data, f, indent=2)
 
 # -------------------------------
-# Utilities
+# Initialize state
 # -------------------------------
-def now():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-def debug_log(msg):
-    st.session_state.setdefault("debug", "")
-    st.session_state["debug"] = f"{now()} - {msg}\n" + st.session_state["debug"]
-
-def summarize_text(text, max_sent=3):
-    sentences = text.split(". ")
-    if len(sentences) <= max_sent:
-        return text
-    vectorizer = TfidfVectorizer().fit(sentences)
-    tfidf = vectorizer.transform(sentences)
-    scores = tfidf.sum(axis=1).A1
-    ranked = [s for _, s in sorted(zip(scores, sentences), reverse=True)]
-    return ". ".join(ranked[:max_sent])
-
-def local_reply(user_input):
-    txt = user_input.lower().strip()
-    if txt.startswith("/persona"):
-        arg = user_input.split(" ", 1)[1:] or ["Jack"]
-        persona["name"] = arg[0]
-        save_json("persona", persona)
-        return f"Persona updated to {arg[0]}"
-    if txt == "/clear":
-        chat.clear()
-        save_json("chat", chat)
-        return "Chat cleared."
-    if txt.startswith("/learn"):
-        content = user_input.split(" ", 1)[1] if " " in user_input else ""
-        if content:
-            memories.append({"key": f"learned_{now()}", "value": content})
-            save_json("memories", memories)
-            return "Learned and saved to memory."
-        return "Usage: /learn <text>"
-    if "time" in txt:
-        return f"Current time: {now()}"
-    if "joke" in txt:
-        return "Why do programmers prefer dark mode? Because light attracts bugs!"
-    if "summary" in txt:
-        joined = " ".join([m["value"] for m in memories])
-        return summarize_text(joined)
-    return random.choice([
-        "Probably fix X and Y. Or set it on fire.",
-        "Looks messy. Might be intentional.",
-        "Check your code, then breathe."
-    ]) + "\n\nContext: " + user_input[:200]
+if "chat" not in st.session_state: st.session_state.chat = load_json("chat", [])
+if "persona" not in st.session_state: st.session_state.persona = load_json("persona", {"name":"Jack","style":"default","tone":"neutral"})
+if "memories" not in st.session_state: st.session_state.memories = load_json("mem", [])
+if "gallery" not in st.session_state: st.session_state.gallery = load_json("gallery", [])
+if "tiny_model" not in st.session_state: st.session_state.tiny_model = load_json("tiny", {"trained":False})
+if "training" not in st.session_state: st.session_state.training = False
 
 # -------------------------------
-# Tiny model (TF-IDF + LinearRegression)
+# Helper functions
 # -------------------------------
-def train_tiny_model():
-    if not examples:
-        return None
-    X = [ex["user"] for ex in examples]
-    y = [ex["assistant"] for ex in examples]
+def speak(text):
+    if not TTS_AVAILABLE: return "TTS not available."
+    engine = pyttsx3.init(); engine.say(text); engine.runAndWait()
+
+def listen():
+    if not STT_AVAILABLE: return "STT not available."
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        st.info("Listening... speak now")
+        audio = r.listen(source)
+    try: return r.recognize_google(audio)
+    except Exception as e: return f"Error: {e}"
+
+def extract_text_from_pdf(uploaded):
+    if not PDF_AVAILABLE: return "PDF extraction unavailable."
+    text = ""
+    with fitz.open(stream=uploaded.read(), filetype="pdf") as doc:
+        for page in doc: text += page.get_text()
+    return text
+
+def extract_text_from_image(uploaded):
+    if not OCR_AVAILABLE: return "OCR unavailable."
+    img = Image.open(uploaded)
+    return pytesseract.image_to_string(img)
+
+def summarize_text(text: str, max_len: int = 200) -> str:
+    words = text.split()
+    return " ".join(words[:max_len]) + ("..." if len(words) > max_len else "")
+
+# -------------------------------
+# Tiny offline ML brain
+# -------------------------------
+def train_tiny_model(examples: List[Dict[str,str]]):
+    if not SKLEARN_AVAILABLE: return {"trained": False, "reason": "sklearn missing"}
+    if not examples: return {"trained": False, "reason": "no examples"}
     vec = TfidfVectorizer()
-    Xv = vec.fit_transform(X)
-    yv = vec.transform(y)
-    model = LinearRegression()
-    model.fit(Xv.toarray(), yv.toarray())
-    debug_log(f"Trained on {len(X)} examples.")
-    return (vec, model)
+    X = vec.fit_transform([e["prompt"] for e in examples])
+    y = np.array([len(e["response"]) for e in examples])
+    reg = LinearRegression().fit(X, y)
+    save_json("tiny", {"trained": True, "features": len(vec.get_feature_names_out())})
+    return {"trained": True, "features": len(vec.get_feature_names_out())}
 
-tiny_model = train_tiny_model()
+def tiny_predict(text: str) -> str:
+    if not st.session_state.tiny_model.get("trained"): return "🤔 Model not trained yet."
+    return random.choice([
+        "That's an interesting take.",
+        "I remember something similar.",
+        "Let's connect that to what we learned.",
+        "I’d say it depends on perspective.",
+        "That reminds me of a prior example."
+    ])
 
 # -------------------------------
-# Streamlit UI
+# Chat and command handling
 # -------------------------------
-st.set_page_config("Jack.AI — Python Edition", layout="wide")
-st.title("🤖 Jack.AI — Super Full (Python Streamlit Edition)")
-st.caption("Local-first • OCR • PDF • TTS/STT • Memory • TF-IDF tiny model")
+def add_message(role, content):
+    st.session_state.chat.append({"role": role, "content": content, "time": datetime.now().isoformat()})
+    save_json("chat", st.session_state.chat)
 
-# Sidebar
-with st.sidebar:
-    st.subheader("Persona / Memory")
-    persona["name"] = st.text_input("Assistant name", persona.get("name", "Jack"))
-    persona["system_prompt"] = st.text_area("System prompt", persona.get("system_prompt", "You are Jack, a witty assistant."))
-    if st.button("💾 Save Persona"):
-        save_json("persona", persona)
-        st.success("Saved persona.")
-    if st.button("🧠 Summarize Memories"):
-        if memories:
-            st.write(summarize_text(" ".join([m["value"] for m in memories])))
+def handle_command(cmd):
+    parts = cmd.strip().split(" ", 1)
+    main = parts[0].lower()
+    arg = parts[1] if len(parts) > 1 else ""
+
+    if main == "/clear":
+        st.session_state.chat = []; save_json("chat", [])
+        return "🧹 Chat cleared."
+
+    elif main == "/persona":
+        if arg:
+            st.session_state.persona["style"] = arg
+            save_json("persona", st.session_state.persona)
+            return f"🧠 Persona switched to '{arg}'."
         else:
-            st.info("No memories yet.")
-    if st.button("🗑 Wipe All Data"):
-        for f in os.listdir(DATA_DIR):
-            os.remove(os.path.join(DATA_DIR, f))
-        st.warning("All local data wiped.")
+            return f"Current persona: {st.session_state.persona}"
 
-# Main chat
-user_input = st.text_area("Ask Jack something...", "", height=120)
-col1, col2, col3 = st.columns([1, 1, 3])
-if col1.button("Send"):
-    reply = local_reply(user_input)
-    chat.append({"role": "user", "text": user_input, "time": now()})
-    chat.append({"role": "assistant", "text": reply, "time": now()})
-    save_json("chat", chat)
-    st.session_state["last_reply"] = reply
+    elif main == "/learn":
+        st.session_state.memories.append({"memory": arg, "time": datetime.now().isoformat()})
+        save_json("mem", st.session_state.memories)
+        return "💾 Learned new fact."
 
-if col2.button("Speak (TTS)"):
-    if "last_reply" in st.session_state:
-        tts = pyttsx3.init()
-        tts.say(st.session_state["last_reply"])
-        tts.runAndWait()
+    elif main == "/train":
+        if st.session_state.training: return "Training already in progress."
+        st.session_state.training = True
+        bar = st.progress(0)
+        for i in range(100):
+            time.sleep(0.02); bar.progress(i+1)
+        result = train_tiny_model(st.session_state.chat)
+        st.session_state.training = False
+        return f"✅ Training complete: {result}"
 
-# Display chat
-st.markdown("---")
-for msg in chat[-20:]:
-    role = "🧍 You" if msg["role"] == "user" else f"🤖 {persona['name']}"
-    st.markdown(f"**{role}** — *{msg['time']}*  \n{msg['text']}")
+    elif main == "/summarize":
+        convo = " ".join([m["content"] for m in st.session_state.chat if m["role"]=="user"])
+        return summarize_text(convo)
 
-# OCR / PDF Tools
-st.markdown("### 📂 File Tools")
-uploaded = st.file_uploader("Upload image or PDF", type=["png", "jpg", "jpeg", "pdf"])
-if uploaded:
-    if uploaded.type == "application/pdf":
-        pdf = fitz.open(stream=uploaded.read(), filetype="pdf")
-        text = ""
-        for page in pdf:
-            text += page.get_text()
-        st.text_area("Extracted PDF Text", text, height=200)
+    elif main == "/speak":
+        speak(arg or "Hello")
+        return "🔊 Spoke out loud."
+
     else:
-        img = Image.open(uploaded)
-        text = pytesseract.image_to_string(img)
-        st.text_area("Extracted OCR Text", text, height=200)
+        return f"Unknown command: {cmd}"
 
-# Debug
-st.markdown("### 🪵 Debug Console")
-st.text_area("Debug output", st.session_state.get("debug", ""), height=180)
+# -------------------------------
+# UI
+# -------------------------------
+st.set_page_config(page_title="Jack.AI — Offline", layout="wide")
+
+st.sidebar.title("Jack.AI — Control")
+choice = st.sidebar.radio("Mode", ["💬 Chat", "🧠 Memory", "🖼️ Gallery", "📂 Import/Export", "⚙️ Debug"])
+
+st.sidebar.markdown("---")
+st.sidebar.write(f"Persona: **{st.session_state.persona['style']}**")
+st.sidebar.write("Offline mode ✅")
+
+# -------------------------------
+# Chat Tab
+# -------------------------------
+if choice == "💬 Chat":
+    st.title("💬 Jack.AI — Offline Assistant")
+    for msg in st.session_state.chat:
+        align = "end" if msg["role"] == "user" else "start"
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    prompt = st.chat_input("Message or /command...")
+    if prompt:
+        add_message("user", prompt)
+        if prompt.startswith("/"):
+            response = handle_command(prompt)
+        else:
+            # Simple persona-aware response
+            mood = st.session_state.persona.get("style", "neutral")
+            if st.session_state.tiny_model.get("trained"):
+                ai = tiny_predict(prompt)
+            else:
+                ai = random.choice([
+                    f"As {mood} Jack, I'd say that’s interesting.",
+                    "I’ll note that down for next time.",
+                    "Let's explore that thought further."
+                ])
+            response = ai
+        add_message("assistant", response)
+        st.rerun()
+
+# -------------------------------
+# Memory Tab
+# -------------------------------
+elif choice == "🧠 Memory":
+    st.title("🧠 Memory")
+    if st.session_state.memories:
+        for m in st.session_state.memories:
+            st.info(f"{m['time']}: {m['memory']}")
+    else:
+        st.warning("No memories yet.")
+
+# -------------------------------
+# Gallery Tab
+# -------------------------------
+elif choice == "🖼️ Gallery":
+    st.title("🖼️ Local Gallery")
+    up = st.file_uploader("Upload image or PDF", type=["png","jpg","jpeg","pdf"])
+    if up:
+        if up.type == "application/pdf" and PDF_AVAILABLE:
+            text = extract_text_from_pdf(up)
+            st.text_area("Extracted PDF Text", text, height=200)
+        elif up.type.startswith("image/") and OCR_AVAILABLE:
+            text = extract_text_from_image(up)
+            st.text_area("Extracted Image Text", text, height=200)
+        st.success("File processed.")
+    if st.session_state.gallery:
+        for item in st.session_state.gallery:
+            st.image(item["data"], caption=item["caption"])
+
+# -------------------------------
+# Import / Export
+# -------------------------------
+elif choice == "📂 Import/Export":
+    st.title("📂 Import / Export Data")
+    exp = st.button("Export all data")
+    if exp:
+        bundle = {k: load_json(k, []) for k in FILES.keys()}
+        st.download_button("Download JSON", json.dumps(bundle, indent=2), "jack_backup.json")
+    imp = st.file_uploader("Import JSON bundle", type=["json"])
+    if imp:
+        data = json.load(imp)
+        for k in FILES.keys():
+            if k in data: save_json(k, data[k])
+        st.success("Imported data.")
+
+# -------------------------------
+# Debug Tab
+# -------------------------------
+elif choice == "⚙️ Debug":
+    st.title("⚙️ Debug Console")
+    st.json({
+        "persona": st.session_state.persona,
+        "chat_len": len(st.session_state.chat),
+        "memories_len": len(st.session_state.memories),
+        "tiny_model": st.session_state.tiny_model,
+        "OCR_AVAILABLE": OCR_AVAILABLE,
+        "PDF_AVAILABLE": PDF_AVAILABLE,
+        "TTS_AVAILABLE": TTS_AVAILABLE,
+        "STT_AVAILABLE": STT_AVAILABLE,
+        "SKLEARN_AVAILABLE": SKLEARN_AVAILABLE,
+    })
