@@ -12,7 +12,7 @@ import math
 import random
 from datetime import datetime
 from typing import List, Dict, Tuple, Any
-global VOCAB, NN_MODEL
+
 # ----------------- Files & persistence -----------------
 STATE_FILE = "ai_state.json"
 DICT_FILE = "dictionary.json"  # optional external dictionary to drop in folder
