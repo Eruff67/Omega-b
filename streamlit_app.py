@@ -43,8 +43,8 @@ ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings"
 # Small embedded dictionary (templated core set)
 # -------------------------
 # You can later upload/merge a richer dictionary.json via UI
+
 BASE_DICT = {
-    BASE_DICT = {
     # Proper nouns / entities
     "george washington": {
         "definition": "The first President of the United States (1789–1797).",
