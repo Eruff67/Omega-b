@@ -1,9 +1,10 @@
-# jack_offline_saved_memory_fast.py
+# jack_offline_saved_memory_combined.py
 # Jack — Offline AI with persistent memory, file ingest, and Streamlit UI
-# Performance-optimized + expanded dictionary.
+# Features: expanded dictionary, fast incremental Markov, real-word filtering, persisted Markov, on-demand rebuild.
+#
 # Run:
 #   pip install streamlit
-#   streamlit run jack_offline_saved_memory_fast.py
+#   streamlit run jack_offline_saved_memory_combined.py
 
 import streamlit as st
 import json
@@ -17,9 +18,9 @@ from typing import List, Dict, Tuple, Any, Optional
 # -------------------------
 # Files & Persistence
 # -------------------------
-STATE_FILE = "ai_state.json"   # persistent state (conversations, learned, settings)
-DICT_FILE = "dictionary.json"  # optional external dictionary to merge
-MARKOV_FILE = "markov_state.json"  # persisted markov map for fast startup
+STATE_FILE = "ai_state.json"      # persistent state (conversations, learned, settings)
+DICT_FILE = "dictionary.json"     # optional external dictionary to merge
+MARKOV_FILE = "markov_state.json" # persisted markov map for fast startup
 
 def load_json(path: str, default):
     try:
@@ -38,27 +39,22 @@ def save_json(path: str, data):
         print("Failed saving", path, e)
 
 # load or init state
-ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings": {}, "model_meta": {}})
-# mark whether heavy model needs rebuild
-ai_state.setdefault("model_dirty", False)
+ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings": {}, "model_meta": {}, "model_dirty": False})
 
 # -------------------------
-# Expanded embedded dictionary (much bigger)
+# Expanded embedded dictionary
+# (keep this reasonably sized here — you can upload larger via dictionary.json)
 # -------------------------
 BASE_DICT = {
-    # short selection of common words, verbs, nouns, adjectives, adverbs, phrases
+    # pronouns & articles
     "i": {"definition":"First-person pronoun.","type":"pronoun","examples":["I went home.","I think that's correct."]},
     "you": {"definition":"Second-person pronoun.","type":"pronoun","examples":["You are kind.","Can you help me?"]},
-    "he": {"definition":"Third-person singular male pronoun.","type":"pronoun","examples":["He is a teacher.","He will arrive soon."]},
-    "she": {"definition":"Third-person singular female pronoun.","type":"pronoun","examples":["She smiled.","She works here."]},
     "we": {"definition":"First-person plural pronoun.","type":"pronoun","examples":["We agree.","We will go tomorrow."]},
-    "they": {"definition":"Third-person plural pronoun.","type":"pronoun","examples":["They left early.","They help often."]},
     "the": {"definition":"Definite article.","type":"article","examples":["The book is on the table.","The sky is blue."]},
     "a": {"definition":"Indefinite article.","type":"article","examples":["A dog barked.","A good idea."]},
-    "an": {"definition":"Indefinite article used before vowel sounds.","type":"article","examples":["An apple fell.","An example is given."]},
 
-    # common verbs
-    "be": {"definition":"Exist, occur, or have a specified quality.","type":"verb","examples":["I want to be helpful.","There will be time."]},
+    # verbs
+    "be": {"definition":"Exist, occur, or have a specified quality.","type":"verb","examples":["I want to be helpful.","There will be a meeting."]},
     "have": {"definition":"Possess or own.","type":"verb","examples":["I have a plan.","They have several options."]},
     "do": {"definition":"Perform an action.","type":"verb","examples":["Do your best.","What did you do?"]},
     "say": {"definition":"Utter words.","type":"verb","examples":["Please say it clearly.","They say it's fine."]},
@@ -71,52 +67,31 @@ BASE_DICT = {
     "see": {"definition":"Perceive with the eyes.","type":"verb","examples":["I see the point.","Can you see it?"]},
     "come": {"definition":"Move towards or arrive.","type":"verb","examples":["Come here.","He came late."]},
     "look": {"definition":"Direct one's gaze.","type":"verb","examples":["Look at this.","She looked surprised."]},
-    "want": {"definition":"Desire to have or do something.","type":"verb","examples":["I want a coffee.","They want to learn."]},
-    "use": {"definition":"Employ for a purpose.","type":"verb","examples":["Use a pen.","We use tools."]},
-    "find": {"definition":"Discover by searching.","type":"verb","examples":["Find the key.","She found a solution."]},
-    "give": {"definition":"Present voluntarily.","type":"verb","examples":["Give me a minute.","He gave a talk."]},
-    "tell": {"definition":"Communicate information to someone.","type":"verb","examples":["Tell me the story.","She told the truth."]},
-    "work": {"definition":"Be engaged in activity to achieve a result.","type":"verb","examples":["I work every day.","This will work well."]},
 
-    # common nouns
+    # nouns
     "time": {"definition":"A continuous quantity in which events occur.","type":"noun","examples":["Time flies.","What time is it?"]},
     "day": {"definition":"A 24-hour period.","type":"noun","examples":["Today is a good day.","We worked all day."]},
-    "man": {"definition":"An adult male human.","type":"noun","examples":["The man waved.","He was a kind man."]},
-    "woman": {"definition":"An adult female human.","type":"noun","examples":["The woman smiled.","She is a strong woman."]},
-    "child": {"definition":"A young person.","type":"noun","examples":["The child laughed.","Children play often."]},
     "world": {"definition":"The earth and its inhabitants.","type":"noun","examples":["The world is changing.","She traveled the world."]},
-    "year": {"definition":"A period of 365 days (approx.).","type":"noun","examples":["Last year was busy.","Each year brings change."]},
     "life": {"definition":"Existence of living beings.","type":"noun","examples":["Life is precious.","He enjoys his life."]},
-    "hand": {"definition":"The end part of a person's arm.","type":"noun","examples":["Raise your hand.","She held my hand."]},
-    "part": {"definition":"A piece or segment of something.","type":"noun","examples":["A small part was missing.","Part of the plan worked."]},
-    "place": {"definition":"A particular position or point in space.","type":"noun","examples":["This is a good place.","Where is the place?"]},
-    "thing": {"definition":"An object, fact or event.","type":"noun","examples":["That thing is new.","The thing matters."]},
-    "problem": {"definition":"A matter needing solution.","type":"noun","examples":["We solved the problem.","This is a problem."]},
-    "question": {"definition":"A sentence worded to elicit information.","type":"noun","examples":["That's a good question.","Ask the question."]},
-    "answer": {"definition":"A response to a question.","type":"noun","examples":["Give the answer.","I have an answer."]},
+    "idea": {"definition":"A thought or suggestion for possible action.","type":"noun","examples":["That's a good idea.","She shared an idea."]},
+    "problem": {"definition":"A matter needing solution.","type":"noun","examples":["We solved the problem.","This is a tricky problem."]},
 
     # adjectives
     "good": {"definition":"Having positive qualities.","type":"adj","examples":["A good idea.","She is good at it."]},
     "new": {"definition":"Not existing before.","type":"adj","examples":["A new book.","This is new."]},
-    "first": {"definition":"Coming before others in time or order.","type":"adj","examples":["The first step.","He was first in line."]},
+    "first": {"definition":"Coming before others.","type":"adj","examples":["The first step.","He was first in line."]},
     "other": {"definition":"Different or distinct from the one mentioned.","type":"adj","examples":["The other person.","On the other hand."]},
-    "many": {"definition":"A large number of.","type":"adj","examples":["Many people agree.","There are many options."]},
-    "small": {"definition":"Of limited size.", "type":"adj","examples":["A small room.","Small changes help."]},
-    "large": {"definition":"Of great size.","type":"adj","examples":["A large group.","A large amount."]},
     "important": {"definition":"Of great significance.","type":"adj","examples":["Important work.","This is important."]},
-    "possible": {"definition":"Able to be done.","type":"adj","examples":["A possible solution.","It's possible."]},
 
-    # adverbs / connectors
+    # adverbs/connectors
     "very": {"definition":"To a high degree.","type":"adv","examples":["Very good.","Very quickly."]},
-    "really": {"definition":"To a considerable degree; truly.","type":"adv","examples":["Really helpful.","I really think so."]},
     "often": {"definition":"Frequently.","type":"adv","examples":["We often meet.","He often calls."]},
     "always": {"definition":"At all times.","type":"adv","examples":["She always smiles.","Always check facts."]},
-    "never": {"definition":"At no time.","type":"adv","examples":["I never knew.","He never comes late."]},
     "sometimes": {"definition":"Occasionally.","type":"adv","examples":["Sometimes I read.","We sometimes travel."]},
     "however": {"definition":"Used to introduce a contrast.","type":"adv","examples":["However, it may fail.","We tried; however it didn't work."]},
     "then": {"definition":"At that time; next.","type":"adv","examples":["Then we left.","Finish, then rest."]},
 
-    # prepositions/conjunctions/modal
+    # prepositions & conjunctions
     "in": {"definition":"Expressing location or position.","type":"prep","examples":["In the room.","Living in the city."]},
     "on": {"definition":"Positioned above and in contact with.","type":"prep","examples":["On the table.","On Monday."]},
     "at": {"definition":"Used for specific times/places.","type":"prep","examples":["At noon.","Meet at the park."]},
@@ -128,47 +103,27 @@ BASE_DICT = {
     "if": {"definition":"Introducing a conditional clause.","type":"conj","examples":["If it rains, we'll stay.","Ask if needed."]},
     "will": {"definition":"Modal verb indicating future.","type":"modal","examples":["I will go.","She will join."]},
     "can": {"definition":"Modal verb indicating ability or possibility.","type":"modal","examples":["Can you help?","It can work."]},
-    "may": {"definition":"Modal verb indicating permission or possibility.","type":"modal","examples":["You may enter.","It may rain."]},
 
-    # question words / phrases
-    "who": {"definition":"Asking for a person.","type":"q","examples":["Who is there?","Who did this?"]},
-    "what": {"definition":"Asking for information or specification.","type":"q","examples":["What happened?","What do you want?"]},
-    "where": {"definition":"Asking for location.","type":"q","examples":["Where is it?","Where did you go?"]},
-    "when": {"definition":"Asking for time or occasion.","type":"q","examples":["When will it start?","When did you arrive?"]},
-    "why": {"definition":"Asking for reason.","type":"q","examples":["Why is that?","Why not try?"]},
-    "how": {"definition":"Asking for method or manner.","type":"q","examples":["How does it work?","How are you?"]},
-
-    # multiword phrases (helpful)
+    # phrases / multiword
     "there is": {"definition":"Used to state existence.","type":"phrase","examples":["There is a way to solve it.","There is a message for you."]},
     "i think": {"definition":"Phrase expressing opinion.","type":"phrase","examples":["I think we should go.","I think it's correct."]},
     "for example": {"definition":"Used to give an example.","type":"phrase","examples":["Many fruits, for example apples, are healthy."]},
-    "as well": {"definition":"Also; in addition.","type":"phrase","examples":["She can come as well.","Bring your notes as well."]},
     "in order to": {"definition":"With the purpose to.","type":"phrase","examples":["In order to learn, practice is required."]},
 
-    # named entities / domain words
+    # domain words
     "paris": {"definition":"Capital city of France.","type":"place","examples":["Paris is beautiful in spring.","I visited Paris."]},
     "python": {"definition":"A high-level programming language.","type":"noun","examples":["I wrote the script in Python.","Python is popular."]},
     "gravity": {"definition":"Force attracting objects to one another.","type":"noun","examples":["Gravity keeps us grounded.","Gravity affects motion."]},
     "pi": {"definition":"Mathematical constant ≈ 3.14159.","type":"number","examples":["Pi is used to compute circumference."]},
 
-    # filler useful verbs/nouns to expand transitions
+    # small extra verbs/nouns for transitions
     "learn": {"definition":"Gain knowledge by study.","type":"verb","examples":["We learn from mistakes.","I want to learn more."]},
-    "teach": {"definition":"Give instruction or information.","type":"verb","examples":["Teach me that trick.","She will teach tomorrow."]},
     "help": {"definition":"Provide assistance.","type":"verb","examples":["Can you help me?","Thanks for the help."]},
     "start": {"definition":"Begin doing something.","type":"verb","examples":["Start now.","We start at nine."]},
     "finish": {"definition":"Bring to an end.","type":"verb","examples":["Finish the task.","He finished quickly."]},
     "read": {"definition":"Look at and understand written words.","type":"verb","examples":["Read the book.","I like to read."]},
-    "write": {"definition":"Mark (letters) on a surface to form words.","type":"verb","examples":["Write a note.","She writes code."]},
+    "write": {"definition":"Mark letters to form words.","type":"verb","examples":["Write a note.","She writes code."]},
     "play": {"definition":"Take part in activity for enjoyment.","type":"verb","examples":["Let's play a game.","They play music."]},
-    "run": {"definition":"Move at a speed faster than walking.","type":"verb","examples":["I run every morning.","The engine runs well."]},
-
-    # small set of adjectives/adverbs to improve fluency
-    "quick": {"definition":"Moving fast.","type":"adj","examples":["A quick reply.","Quick and simple."]},
-    "slow": {"definition":"Moving at a low speed.","type":"adj","examples":["A slow process.","Don't be slow."]},
-    "happy": {"definition":"Feeling or showing pleasure.","type":"adj","examples":["She felt happy.","A happy ending."]},
-    "sad": {"definition":"Feeling sorrow.","type":"adj","examples":["A sad story.","Don't be sad."]},
-    "carefully": {"definition":"With care or attention.","type":"adv","examples":["Read carefully.","Drive carefully."]},
-    "easily": {"definition":"Without difficulty.","type":"adv","examples":["It can be done easily.","She solved it easily."]},
 }
 
 # merge external dictionary file if present at startup
@@ -188,13 +143,222 @@ def merged_dictionary() -> Dict[str, Dict[str,Any]]:
 # -------------------------
 # Knowledge base for quick facts
 # -------------------------
-KB: Dict[str,str] = {
-    "who was the first president of the united states": "George Washington",
-    "capital of france": "Paris",
-    "largest planet": "Jupiter",
-    "what is pi": "Pi is approximately 3.14159",
-    "who wrote hamlet": "William Shakespeare",
+# -------------------------
+# Big Knowledge base for quick facts (large)
+# Keys are lowercase normalized question phrases
+# -------------------------
+KB = {
+    # History & dates
+    "who was the first president of the united states": "George Washington (1789–1797).",
+    "who was the first us president": "George Washington (1789–1797).",
+    "who was the 16th president of the united states": "Abraham Lincoln (1861–1865).",
+    "when was the declaration of independence signed": "The U.S. Declaration of Independence was adopted on July 4, 1776.",
+    "when did world war i start": "World War I began in 1914.",
+    "when did world war i end": "World War I ended in 1918.",
+    "when did world war ii start": "World War II began in 1939.",
+    "when did world war ii end": "World War II ended in 1945.",
+    "who discovered america": "Christopher Columbus's 1492 voyage reached the Americas for Europe; indigenous peoples lived there long before.",
+    "who discovered penicillin": "Alexander Fleming is credited with discovering penicillin in 1928.",
+    "when was napoleon defeated": "Napoleon was finally defeated at the Battle of Waterloo in 1815.",
+
+    # Capitals & countries
+    "capital of france": "Paris.",
+    "capital of germany": "Berlin.",
+    "capital of spain": "Madrid.",
+    "capital of italy": "Rome.",
+    "capital of united kingdom": "London.",
+    "capital of the united states": "Washington, D.C.",
+    "capital of canada": "Ottawa.",
+    "capital of australia": "Canberra.",
+    "capital of russia": "Moscow.",
+    "capital of china": "Beijing.",
+    "capital of japan": "Tokyo.",
+    "capital of india": "New Delhi.",
+    "which country has the largest population": "China (followed closely by India).",
+    "which is the largest country by area": "Russia is the largest country by area.",
+    "which continent is brazil in": "Brazil is in South America.",
+    "what is the largest ocean": "The Pacific Ocean.",
+
+    # Science & nature
+    "what is gravity": "Gravity is the force by which objects with mass attract each other (≈9.81 m/s² near Earth's surface).",
+    "what is photosynthesis": "A process by which plants convert light energy into chemical energy, producing oxygen and glucose from CO₂ and water.",
+    "what is the largest planet": "Jupiter.",
+    "what is the smallest planet": "Mercury (excluding dwarf planets).",
+    "what is the sun": "The Sun is a star at the center of the Solar System that supplies light and heat to Earth.",
+    "how far is the earth from the sun": "About 1 astronomical unit ≈ 149.6 million kilometers (≈93 million miles).",
+    "what is dna": "DNA (deoxyribonucleic acid) stores genetic information in living organisms.",
+    "what is rna": "RNA (ribonucleic acid) is a molecule involved in coding, decoding, regulation, and expression of genes.",
+    "what is a gene": "A gene is a unit of heredity made of DNA that codes for a protein or functional product.",
+    "what is cellular respiration": "A process cells use to convert nutrients into energy (ATP), producing CO₂ and water.",
+    "what is an atom": "The smallest unit of ordinary matter, made of protons, neutrons, and electrons.",
+    "what is a molecule": "Two or more atoms chemically bonded together.",
+
+    # Math & constants
+    "what is pi": "Pi (π) ≈ 3.141592653589793 — the ratio of a circle's circumference to its diameter.",
+    "what is e": "Euler's number e ≈ 2.718281828 — the base of natural logarithms.",
+    "what is the speed of light": "Approximately 299,792,458 meters per second in vacuum.",
+    "what is avogadros number": "Avogadro's number ≈ 6.02214076 × 10^23 (particles per mole).",
+    "what is 2 plus 2": "2 + 2 = 4.",
+    "what is the square root of 9": "The square root of 9 is 3.",
+    "how many degrees in a circle": "360 degrees.",
+    "what is a prime number": "A number greater than 1 with no positive divisors other than 1 and itself.",
+
+    # Units & conversions
+    "how many centimeters in a meter": "100 centimeters in 1 meter.",
+    "how many meters in a kilometer": "1000 meters in 1 kilometer.",
+    "how many inches in a foot": "12 inches in 1 foot.",
+    "how many feet in a yard": "3 feet in 1 yard.",
+    "how many ounces in a pound": "16 ounces in 1 pound (avoirdupois).",
+    "convert celsius to fahrenheit": "°F = °C × 9/5 + 32.",
+    "convert fahrenheit to celsius": "°C = (°F − 32) × 5/9.",
+
+    # Biology & health (general info, not medical advice)
+    "what is a fever": "A fever is a raised body temperature, often a sign of infection. Adults: temps above ~38°C (100.4°F).",
+    "what is dehydration": "A condition when the body loses more fluids than it takes in; symptoms include thirst, low urine output, dizziness.",
+    "what is a vaccination": "A vaccine stimulates the immune system to develop protection against a disease-causing organism.",
+    "what is an antibiotic": "A medicine that destroys or inhibits the growth of bacteria; not effective against viruses.",
+    "what is a virus": "A tiny infectious agent that needs a host cell to replicate.",
+
+    # Computers & technology
+    "what is python": "Python is a high-level programming language known for readability and wide use in scripting and data science.",
+    "what is an api": "An API (Application Programming Interface) allows software systems to communicate and exchange data.",
+    "what is machine learning": "A field of AI where models learn patterns from data to make predictions or decisions.",
+    "what is a database": "A structured collection of data stored and accessed electronically.",
+    "what is cloud computing": "Delivery of computing services (servers, storage, databases, networking) over the internet.",
+    "what is github": "A web-based platform for hosting and collaborating on Git repositories (code).",
+    "what is linux": "An open-source family of Unix-like operating systems based on the Linux kernel.",
+
+    # Web / internet basics
+    "what is http": "HTTP is the Hypertext Transfer Protocol used for transferring web pages on the internet.",
+    "what is https": "HTTPS is HTTP over TLS/SSL — it encrypts web traffic for security.",
+    "what is a url": "A Uniform Resource Locator — the address used to access resources on the web.",
+    "what is dns": "Domain Name System — translates human-readable domain names to IP addresses.",
+
+    # Programming basics
+    "what is a variable": "A named storage location that holds a value in programming.",
+    "what is a function": "A reusable block of code that performs a specific task.",
+    "what is a loop": "A programming construct that repeats a block of code while a condition holds true.",
+    "what is recursion": "When a function calls itself to solve smaller instances of a problem.",
+
+    # Literature & arts
+    "who wrote hamlet": "William Shakespeare.",
+    "who wrote pride and prejudice": "Jane Austen.",
+    "who painted the mona lisa": "Leonardo da Vinci.",
+    "what is a sonnet": "A 14-line poem with a specific rhyme scheme, often about love or philosophy.",
+
+    # People & biographies (short)
+    "who is elon musk": "Entrepreneur: SpaceX, Tesla, Neuralink, among others (roles may change over time).",
+    "who is barack obama": "44th President of the United States (2009–2017).",
+    "who is albert einstein": "Physicist known for the theory of relativity and contributions to quantum mechanics.",
+    "who discovered america": "Christopher Columbus's 1492 voyage reached the Americas for Europe; indigenous peoples inhabited the continents long before.",
+
+    # Geography & travel
+    "what is the highest mountain": "Mount Everest is the highest mountain above sea level (≈8,848 m).",
+    "what is the longest river": "The Nile and Amazon are both contenders depending on measurement method; commonly the Nile is cited as the longest.",
+    "what currency does the united states use": "United States dollar (USD).",
+    "what currency does japan use": "Japanese yen (JPY).",
+    "what language is spoken in brazil": "Portuguese is the official language of Brazil.",
+
+    # Food & cooking
+    "how do i boil an egg": "Place eggs in boiling water and cook 6–8 minutes for medium, 9–12 minutes for hard; cool in cold water to stop cooking.",
+    "how to make coffee": "Brew ground coffee with hot water using your preferred method (drip, French press, espresso), adjusting coffee-to-water ratio to taste.",
+    "what is baking soda": "Sodium bicarbonate, a leavening agent used in baking.",
+    "what is baking powder": "A mixture that contains baking soda and acids to create chemical leavening when moistened and heated.",
+
+    # Practical 'how-to' & everyday tasks
+    "how to tie a tie": "A common method is the four-in-hand knot: wrap the wide end over the narrow, loop, bring through and tighten. Many illustrated tutorials online.",
+    "how to reset a password": "Use the service's 'forgot password' link to receive reset instructions via email or SMS; follow provider-specific steps.",
+    "how to take a screenshot": "On Windows: PrtScn or Win+Shift+S; macOS: Cmd+Shift+3 or Cmd+Shift+4; many phones use power+volume buttons.",
+    "how to unzip a file": "On many systems you can right-click → Extract; or use command-line tools like unzip (Linux/macOS) or Expand-Archive (PowerShell).",
+
+    # Sports & entertainment
+    "how many players in a soccer team": "11 players on the field per team in association football (soccer).",
+    "how many players in basketball": "5 players on the court per team in basketball.",
+    "what is the super bowl": "The NFL's annual championship game in American football (United States).",
+
+    # Law & civics (general)
+    "how to register to vote": "Voter registration procedures vary by country and state — check your local election authority for requirements and deadlines.",
+    "what is a constitution": "A set of fundamental principles or established precedents according to which a state is governed.",
+
+    # Business & finance
+    "what is inflation": "A general rise in prices and fall in purchasing power of money.",
+    "what is a stock": "A share of ownership in a company.",
+    "what is interest rate": "The percentage charged on a loan or paid on savings, typically expressed annually.",
+
+    # Short definitions
+    "definition of algorithm": "A step-by-step procedure for solving a problem or performing a task.",
+    "definition of computer": "An electronic device that processes data according to programmed instructions.",
+    "definition of democracy": "A system of government by the whole population, typically through elected representatives.",
+
+    # Quick facts & trivia
+    "what is the boiling point of water": "100 °C (212 °F) at standard atmospheric pressure (sea level).",
+    "what is the freezing point of water": "0 °C (32 °F) at standard atmospheric pressure.",
+    "how many seconds in a minute": "60 seconds.",
+    "how many minutes in an hour": "60 minutes.",
+    "how many hours in a day": "24 hours.",
+    "how many days in a year": "365 days (366 in a leap year).",
+
+    # Science history & discoveries
+    "who proposed the theory of relativity": "Albert Einstein proposed the theory of relativity.",
+    "who discovered electricity": "Electric phenomena were studied over centuries; Benjamin Franklin, Alessandro Volta, Michael Faraday, and others made key discoveries.",
+
+    # Computing concepts
+    "what is encryption": "The process of encoding information so only authorized parties can read it.",
+    "what is a firewall": "A system that monitors and controls incoming and outgoing network traffic based on security rules.",
+    "what is a virus (computer)": "Malicious software that can replicate and damage systems or data.",
+
+    # Education & institutions
+    "what is mit": "Massachusetts Institute of Technology (MIT), a research university in Cambridge, Massachusetts.",
+    "what is harvard": "Harvard University, an Ivy League research university in Cambridge, Massachusetts.",
+
+    # Weather & climate
+    "what causes rain": "Condensed water vapor in clouds forms droplets that fall as precipitation when heavy enough.",
+    "what is climate change": "Long-term changes in average weather patterns, including global warming driven largely by greenhouse gas emissions.",
+
+    # Astronomy
+    "what is a black hole": "A region of spacetime with gravity so strong that nothing, not even light, can escape from it.",
+    "what is a galaxy": "A system of stars, gas, dust, and dark matter bound together by gravity (e.g., the Milky Way).",
+    "how many planets in the solar system": "There are eight planets: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune.",
+
+    # Language & grammar
+    "what is a noun": "A word that names a person, place, thing, or idea.",
+    "what is a verb": "A word that expresses an action, occurrence, or state of being.",
+    "what is an adjective": "A word that modifies or describes a noun.",
+
+    # Travel & transport
+    "what is an airport": "A facility where aircraft take off and land; includes runways, terminals, and support services.",
+    "how to get a passport": "Apply through your country's passport authority; requirements typically include ID, photos, and fees.",
+
+    # Safety & emergencies
+    "what to do in a fire": "Get out quickly, stay low to avoid smoke, call emergency services when safe, and follow evacuation plans.",
+    "what to do for a heart attack": "Call emergency services immediately; if trained, begin CPR if the person is unresponsive and not breathing normally.",
+
+    # Consumer & shopping
+    "how to return an item": "Check the seller's return policy, keep the receipt, and follow the provider's return/exchange instructions.",
+    "how to check a warranty": "Review the product documentation or the manufacturer's website for warranty terms and claim process.",
+
+    # Arts & culture
+    "what is jazz": "A music genre that originated in African-American communities, known for improvisation and syncopated rhythms.",
+    "what is classical music": "Art music rooted in Western traditions, spanning from the medieval era to the contemporary period.",
+
+    # Misc short useful facts
+    "what is the internet": "A global network connecting computers and other devices for data exchange.",
+    "what is email": "Electronic mail — messages sent over the internet between users.",
+    "how to send an email": "Use an email client or webmail, compose a message, enter recipient address, subject, body, and press send.",
+
+    # Localized or alternate phrasings to help matching
+    "who was the first president of the u s a": "George Washington (1789–1797).",
+    "who wrote hamlet play": "William Shakespeare.",
+    "what is the capital of france": "Paris.",
+    "what is the capital of the united states": "Washington, D.C.",
+
+    # Short fallback hints
+    "who invented the telephone": "Alexander Graham Bell is often credited, though others contributed to telephone-like inventions.",
+    "who invented the light bulb": "Thomas Edison improved and commercialized electric light; others like Humphry Davy and Joseph Swan made earlier contributions.",
+
+    # Add more if needed...
 }
+
 
 # -------------------------
 # Tokenization & vocab (cached)
@@ -210,7 +374,6 @@ _cached_vocab_key = None
 def build_vocab(force: bool=False) -> List[str]:
     global _cached_vocab, _cached_vocab_key
     md = merged_dictionary()
-    # create a simple fingerprint of sources that matter
     key = (len(md), len(ai_state.get("learned",{})), len(ai_state.get("conversations",[])))
     if not force and _cached_vocab and key == _cached_vocab_key:
         return _cached_vocab
@@ -220,7 +383,6 @@ def build_vocab(force: bool=False) -> List[str]:
         vocab.update(tokenize(v.get("definition","")))
         for ex in v.get("examples",[]):
             vocab.update(tokenize(ex))
-    # also include recent conversation tokens
     for c in ai_state.get("conversations", [])[-200:]:
         vocab.update(tokenize(c.get("text","")))
     vocab.update(["what","who","when","where","why","how","define","means","calculate","time","date"])
@@ -239,7 +401,7 @@ def text_to_vector(text: str, vocab_list: List[str]) -> List[float]:
     return [x/norm for x in vec]
 
 # -------------------------
-# TinyNN (from-scratch) for intent classification (smaller/faster)
+# TinyNN (small & fast)
 # -------------------------
 def random_matrix(rows, cols, scale=0.1):
     return [[(random.random()*2-1)*scale for _ in range(cols)] for _ in range(rows)]
@@ -281,8 +443,8 @@ class TinyNN:
         return max(range(len(out)), key=lambda i: out[i])
 
     def train(self, dataset: List[Tuple[List[float], int]], epochs:int=20, lr:float=0.06):
-        # faster training by default (epochs reduced)
-        if not dataset: return
+        if not dataset:
+            return
         for _ in range(epochs):
             random.shuffle(dataset)
             for x_vec, label in dataset:
@@ -337,14 +499,16 @@ def build_training(vocab: List[str]) -> List[Tuple[List[float], int]]:
     return data
 
 # -------------------------
-# Markov fallback generator (persisted + incremental train)
+# Markov fallback generator (filtered to real words) - no annotations
 # -------------------------
 class Markov:
     def __init__(self):
-        self.map: Dict[Tuple[str,str], Dict[str,int]] = {}
-        self.starts: List[Tuple[str,str]] = []
+        # map: (w1,w2) -> { next_word: count, ... }
+        self.map = {}
+        # list of starting bigrams observed
+        self.starts = []
 
-    def train(self, text: str):
+    def train(self, text):
         toks = tokenize(text)
         if len(toks) < 3:
             return
@@ -355,41 +519,94 @@ class Markov:
             self.map.setdefault(key, {})
             self.map[key][nxt] = self.map[key].get(nxt, 0) + 1
 
-    def _best_choice(self, choices: Dict[str,int]) -> Optional[str]:
+    def _best_choice(self, choices):
+        """Return the most likely next token (argmax)."""
         if not choices:
             return None
         best = max(sorted(choices.items()), key=lambda kv: kv[1])
         return best[0]
 
-    def _best_unigram_after(self, token: str) -> Optional[str]:
-        candidates: Dict[str,int] = {}
+    def _valid_tokens_set(self):
+        """Return a set of 'real' tokens to prefer: merged dictionary tokens + vocab."""
+        try:
+            source_vocab = set(VOCAB) if VOCAB else set(build_vocab())
+        except Exception:
+            source_vocab = set(build_vocab())
+        md = merged_dictionary()
+        dict_tokens = set()
+        for k,v in md.items():
+            dict_tokens.update(tokenize(k))
+            dict_tokens.update(tokenize(v.get("definition","")))
+            for ex in v.get("examples",[]):
+                dict_tokens.update(tokenize(ex))
+        return source_vocab | dict_tokens
+
+    def _is_real_word(self, tok, allowed_set):
+        # allow single-letter 'a' and 'i'
+        if not re.fullmatch(r"[a-zA-Z']+", tok):
+            return False
+        if len(tok) == 1 and tok.lower() not in ("a","i"):
+            return False
+        if allowed_set and tok not in allowed_set:
+            return False
+        return True
+
+    def _best_choice_filtered(self, choices):
+        """Pick the highest-count choice that also passes the 'real word' checks.
+           Fall back to unfiltered best choice if none pass."""
+        if not choices:
+            return None
+        allowed = self._valid_tokens_set()
+        filtered = [(w,c) for w,c in choices.items() if self._is_real_word(w, allowed)]
+        if filtered:
+            best = max(sorted(filtered), key=lambda kv: kv[1])
+            return best[0]
+        return self._best_choice(choices)
+
+    def _best_unigram_after(self, token):
+        """Backoff: look for bigrams that start with token and choose most common follower overall,
+           but prefer 'real' words."""
+        candidates = {}
         for (a,b), nxts in self.map.items():
             if a == token:
                 for w,cnt in nxts.items():
                     candidates[w] = candidates.get(w,0) + cnt
         if not candidates:
             return None
+        filt = [(w,c) for w,c in candidates.items() if self._is_real_word(w, self._valid_tokens_set())]
+        if filt:
+            best = max(sorted(filt), key=lambda kv: kv[1])
+            return best[0]
         return self._best_choice(candidates)
 
-    def generate(self, seed: str=None, max_words:int=40) -> str:
+    def generate(self, seed=None, max_words=40):
+        """
+        Deterministic greedy generation with 'real word' filtering:
+         - If seed has >=2 tokens and we have a matching bigram, greedily pick the most likely next real word
+           and repeat using the last two words each step, returning only the NEW words (continuation).
+         - Back off to a unigram-after-last-token heuristic if exact bigram missing.
+         - If no seed or nothing found, produce a full sentence from a random start (still preferring real words).
+        """
         if seed:
             toks = tokenize(seed)
             if len(toks) >= 2:
                 key = (toks[-2].lower(), toks[-1].lower())
-                continuation: List[str] = []
+                continuation = []
                 for _ in range(max_words):
                     if key in self.map:
-                        nxt = self._best_choice(self.map[key])
+                        nxt = self._best_choice_filtered(self.map[key])
                     else:
                         nxt = self._best_unigram_after(key[1])
                     if not nxt:
                         break
+                    # safety: avoid short-token loops
+                    if len(continuation) >= 2 and continuation[-1] == nxt and len(nxt) <= 2:
+                        break
                     continuation.append(nxt)
                     key = (key[1], nxt)
-                    if len(continuation) >= 3 and continuation[-1] == continuation[-2] == continuation[-3]:
-                        break
                 if continuation:
                     return " ".join(continuation)
+        # No seed or couldn't continue: generate full sentence preferring real words
         if not self.starts:
             return ""
         key = random.choice(self.starts)
@@ -398,7 +615,7 @@ class Markov:
             choices = self.map.get((out[-2], out[-1]))
             if not choices:
                 break
-            nxt = self._best_choice(choices)
+            nxt = self._best_choice_filtered(choices)
             if not nxt:
                 break
             out.append(nxt)
@@ -408,46 +625,45 @@ class Markov:
 
 MARKOV = Markov()
 
-def train_markov_full():
-    """Full rebuild of Markov from dictionary + conversations (expensive)."""
-    MARKOV.map.clear(); MARKOV.starts.clear()
-    md = merged_dictionary()
-    for k,v in md.items():
-        for ex in v.get("examples", []): MARKOV.train(ex)
-        MARKOV.train(k + " " + v.get("definition",""))
-    for c in ai_state.get("conversations", []):
-        MARKOV.train(c.get("text",""))
-    # persist to disk so startup is fast next time
-    try:
-        serial = {"starts": MARKOV.starts, "map": MARkOV_to_serializable(MARKOV.map)}
-        save_json(MARKOV_FILE, serial)
-    except Exception:
-        pass
-
-def MARkOV_to_serializable(m: Dict[Tuple[str,str], Dict[str,int]]):
+def markov_serialize(m):
     out = {}
     for (a,b), nxts in m.items():
         out[f"{a}||{b}"] = nxts
     return out
 
-def MARkOV_from_serializable(serial: Dict[str, Dict[str,int]]):
+def markov_deserialize(serial):
     out = {}
     for k,v in serial.items():
         a,b = k.split("||")
         out[(a,b)] = v
     return out
 
+def train_markov_full():
+    """Full rebuild of Markov from dictionary + conversations (expensive-ish)."""
+    MARKOV.map.clear(); MARKOV.starts.clear()
+    md = merged_dictionary()
+    for k,v in md.items():
+        for ex in v.get("examples", []):
+            MARKOV.train(ex)
+        MARKOV.train(k + " " + v.get("definition",""))
+    for c in ai_state.get("conversations", []):
+        MARKOV.train(c.get("text",""))
+    # persist to disk
+    try:
+        serial = {"starts": MARKOV.starts, "map": markov_serialize(MARKOV.map)}
+        save_json(MARKOV_FILE, serial)
+    except Exception:
+        pass
+
 # try load persisted markov on startup (fast)
 try:
     mser = load_json(MARKOV_FILE, None)
     if mser and isinstance(mser, dict) and "map" in mser:
         MARKOV.starts = mser.get("starts", [])
-        MARKOV.map = MARkOV_from_serializable(mser.get("map", {}))
+        MARKOV.map = markov_deserialize(mser.get("map", {}))
     else:
-        # full build on first run
         train_markov_full()
 except Exception:
-    # fallback: build from available data
     train_markov_full()
 
 # -------------------------
@@ -514,7 +730,6 @@ def build_and_train_model(force: bool=False):
     """Expensive: build vocab and train TinyNN. Call only when needed."""
     global VOCAB, NN_MODEL
     VOCAB = build_vocab(force=force)
-    # smaller hidden_dim proportional to vocab but clamped small to speed up
     hidden_dim = max(24, len(VOCAB)//12 or 16)
     NN_MODEL = TinyNN(len(VOCAB), hidden_dim, len(INTENTS))
     dataset = build_training(VOCAB)
@@ -523,11 +738,10 @@ def build_and_train_model(force: bool=False):
     ai_state["model_dirty"] = False
     save_json(STATE_FILE, ai_state)
 
-# build a tiny model at startup but keep it small — user can rebuild fully
+# build a tiny model at startup but let user rebuild fully if desired
 build_and_train_model(force=False)
 
-def incremental_retrain_fast():
-    """Mark model dirty; schedule rebuild only when user requests."""
+def incremental_model_mark_dirty():
     ai_state["model_dirty"] = True
     save_json(STATE_FILE, ai_state)
 
@@ -594,10 +808,8 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
             w = normalize_key(m.group(1)); d = m.group(2).strip()
             ai_state.setdefault("learned", {})[w] = {"definition": d, "type":"learned", "examples": []}
             save_json(STATE_FILE, ai_state)
-            # fast incremental: train markov on the example phrase but defer heavy NN retrain
             MARKOV.train(f"{w} {d}")
-            ai_state["model_dirty"] = True
-            save_json(STATE_FILE, ai_state)
+            incremental_model_mark_dirty()
             return {"reply": f"Learned definition for '{w}'. (Model rebuild recommended for best intent recognition.)", "meta":{"intent":"learning"}}
         m2 = re.match(r'\s*([A-Za-z\'\- ]+)\s*$', rest)
         if m2:
@@ -614,10 +826,8 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
     if w and d:
         ai_state.setdefault("learned", {})[w] = {"definition": d, "type":"learned", "examples": []}
         save_json(STATE_FILE, ai_state)
-        # incremental markov training (fast)
         MARKOV.train(f"{w} {d}")
-        ai_state["model_dirty"] = True
-        save_json(STATE_FILE, ai_state)
+        incremental_model_mark_dirty()
         return {"reply": f"Saved learned definition: '{w}' = {d} (Model rebuild recommended.)", "meta":{"intent":"learning"}}
 
     # classification via TinyNN (if available)
@@ -682,20 +892,17 @@ def ingest_text_content(name: str, text: str, save_as_memory: bool=True):
         key = f"ingest_{name}_{added}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         if save_as_memory:
             ai_state.setdefault("learned", {})[key] = {"definition": p[:200], "type":"ingest", "examples":[p[:200]]}
-            # incremental markov train on paragraph (fast)
             MARKOV.train(p)
         else:
             ai_state.setdefault("conversations", []).append({"role":"assistant","text":p,"time":datetime.now().isoformat()})
-            # incremental markov train on conversation snippet (fast)
             MARKOV.train(p)
         added += 1
     save_json(STATE_FILE, ai_state)
-    # mark heavy NN rebuild as needed, but don't block UI
     ai_state["model_dirty"] = True
     save_json(STATE_FILE, ai_state)
-    # persist markov to disk (fast-ish)
+    # persist markov quickly
     try:
-        serial = {"starts": MARKOV.starts, "map": MARkOV_to_serializable(MARKOV.map)}
+        serial = {"starts": MARKOV.starts, "map": markov_serialize(MARKOV.map)}
         save_json(MARKOV_FILE, serial)
     except Exception:
         pass
@@ -704,8 +911,8 @@ def ingest_text_content(name: str, text: str, save_as_memory: bool=True):
 # -------------------------
 # UI: Streamlit Chat & Controls
 # -------------------------
-st.set_page_config(page_title="Jack — Offline AI (Saved Memory)", layout="wide")
-st.title("Jack — Offline AI (Persistent Memory) — Fast Mode")
+st.set_page_config(page_title="Jack — Offline AI (Persistent Memory)", layout="wide")
+st.title("Jack — Offline AI (Persistent Memory) — Combined")
 
 left, right = st.columns([3,1])
 
@@ -794,7 +1001,6 @@ with right:
                 for c in payload.get("conversations", []):
                     ai_state.setdefault("conversations", []).append(c)
                 save_json(STATE_FILE, ai_state)
-                # rebuild full markov and model recommended
                 ai_state["model_dirty"] = True
                 save_json(STATE_FILE, ai_state)
                 st.success("Merged imported state. Model marked dirty.")
@@ -826,9 +1032,7 @@ with left:
             ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
             ai_state.setdefault("conversations", []).append({"role":"assistant","text":reply,"time":datetime.now().isoformat()})
             save_json(STATE_FILE, ai_state)
-            # incremental markov train of user+assistant snippet (fast)
             MARKOV.train(ui); MARKOV.train(reply)
-            # don't retrain heavy NN automatically; mark dirty for later rebuild
             ai_state["model_dirty"] = True
             save_json(STATE_FILE, ai_state)
             st.rerun()
@@ -843,10 +1047,8 @@ with left:
                     final = (ui + " " + cont).strip()
                 ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
                 ai_state.setdefault("conversations", []).append({"role":"assistant","text":final,"time":datetime.now().isoformat()})
-                # incremental markov train on final
                 MARKOV.train(ui); MARKOV.train(final)
                 save_json(STATE_FILE, ai_state)
-                # mark heavy model dirty
                 ai_state["model_dirty"] = True
                 save_json(STATE_FILE, ai_state)
             else:
