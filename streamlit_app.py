@@ -612,12 +612,12 @@ with right:
         with st.spinner("Rebuilding (fast) — this should be quick..."):
             build_and_train_model(force=True)
             st.success("Rebuild complete — model_dirty cleared.")
-            st.experimental_rerun()
+            st.rerun()
 
     st.markdown("---")
     st.write("Persisted Markov: " + ("loaded" if _markov_loaded else "not found"))
     if st.button("Clear learned memories"):
-        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); st.success("Learned cleared."); st.experimental_rerun()
+        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); st.success("Learned cleared."); st.rerun()
 
 with left:
     st.subheader("Conversation")
@@ -645,7 +645,7 @@ with left:
             # light on-the-fly training: add the user+reply to markov to improve future generations
             MARKOV.train(ui); MARKOV.train(reply)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            st.experimental_rerun()
+            st.rerun()
 
     if c2.button("Generate Paragraph"):
         ui = user_input.strip()
@@ -657,7 +657,7 @@ with left:
             save_json(STATE_FILE, ai_state)
             MARKOV.train(para)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            st.experimental_rerun()
+            st.rerun()
 
     if c3.button("Teach (word: definition)"):
         ui = user_input.strip()
@@ -668,7 +668,7 @@ with left:
             save_json(STATE_FILE, ai_state)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
             st.success(f"Learned '{w}'.")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.warning("To teach: enter `word: definition` (e.g. gravity: a force that pulls)")
 
