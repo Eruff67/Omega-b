@@ -34,9 +34,40 @@ DEVICE_ID = get_or_create_device_id()
 # -------------------------
 # Files & Persistence (device-scoped)
 # -------------------------
+# ======================================================
+# Device- and session-specific isolation layer
+# ======================================================
+import uuid, hashlib
+
+DEVICE_ID_FILE = ".jack_device_id"
+
+def get_or_create_device_id():
+    """Create or read a unique local ID so every device/session is isolated."""
+    try:
+        # Try saving a small file on disk for this device
+        if os.path.exists(DEVICE_ID_FILE):
+            with open(DEVICE_ID_FILE, "r") as f:
+                return f.read().strip()
+        new_id = str(uuid.uuid4())[:8]
+        with open(DEVICE_ID_FILE, "w") as f:
+            f.write(new_id)
+        return new_id
+    except Exception:
+        # Fallback for read-only or cloud environments: use Streamlit session hash
+        sid = st.session_state.get("_sid")
+        if not sid:
+            sid = hashlib.sha1(str(uuid.uuid4()).encode()).hexdigest()[:8]
+            st.session_state["_sid"] = sid
+        return sid
+
+DEVICE_ID = get_or_create_device_id()
+
+# Use per-device JSON files so data never overlaps
 STATE_FILE = f"ai_state_{DEVICE_ID}.json"
-DICT_FILE = f"dictionary_{DEVICE_ID}.json"       # persisted large dict (generated once on demand)
+DICT_FILE = f"dictionary_{DEVICE_ID}.json"
 MARKOV_FILE = f"markov_state_{DEVICE_ID}.json"
+
+print(f"[Jack.AI] Private session active — device ID: {DEVICE_ID}")
 
 def load_json(path: str, default):
     try:
