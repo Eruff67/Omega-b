@@ -54,7 +54,7 @@ def generate_corpus() -> List[str]:
     nouns = ["cat","dog","child","city","teacher","student","computer","book","car","river","mountain","friend","idea","moment","problem","day","night","house","garden","sky"]
     verbs = ["saw","likes","loves","found","reads","writes","drives","walks","jumps","learns","teaches","knows","understands","creates","builds","says","thinks","wonders","watches","helps"]
     adjectives = ["quick","slow","bright","dark","happy","sad","quiet","loud","old","young","strong","weak","big","small","warm","cold","sharp","soft","clear","noisy"]
-    adverbs = ["quickly","slowly","carefully","easily","often","always","sometimes","rarely","never","happily","sadly","quietly","loudly","brightly","calmly"]
+    adverbs = ["quickly","slowly","carefully","easily","often","always","sometimes","rarely","never","happily","sadly","quietly","loudly","brightly","calmly","angrily"]
     preps = ["in","on","at","with","for","about","under","over","between","near","behind","across","through"]
     starters = ["in the morning","at night","yesterday","today","tomorrow","last week","this week","every day","sometimes","usually"]
     puncts = [".", ".", ".", "!", "?", ";", ":" ]  # make period more likely
