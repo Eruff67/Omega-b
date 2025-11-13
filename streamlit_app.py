@@ -180,6 +180,118 @@ BASE_DICT = {
 # add generated corpus as a single entry so examples are picked up by Markov
 BASE_DICT["__corpus__"] = {"definition": "500-sentence curated corpus to improve Markov grammar and transitions", "type": "corpus", "examples": generate_corpus()}
 
+# --- bulk vocabulary expansion (food, verbs, pronouns, nouns, adjectives, adverbs, auxiliaries) ---
+extra_words = {
+    # Food / drink (nouns)
+    "apple": {"definition":"A sweet, edible fruit.","type":"noun","examples":["i ate an apple.","an apple a day."]},
+    "banana": {"definition":"A long yellow fruit.","type":"noun","examples":["peel a banana.","banana smoothies are tasty."]},
+    "bread": {"definition":"Baked food made from flour and water.","type":"noun","examples":["slice the bread.","toast the bread."]},
+    "rice": {"definition":"Small white grains used as a staple food.","type":"noun","examples":["cook the rice.","fried rice tastes good."]},
+    "pasta": {"definition":"Italian noodles made from wheat.","type":"noun","examples":["boil the pasta.","pasta with sauce."]},
+    "cheese": {"definition":"Dairy product made from milk.","type":"noun","examples":["grate the cheese.","cheese on pizza."]},
+    "chicken": {"definition":"Poultry meat used in many dishes.","type":"noun","examples":["roast the chicken.","chicken soup is warm."]},
+    "beef": {"definition":"Meat from cattle.","type":"noun","examples":["grill the beef.","beef stew is hearty."]},
+    "fish": {"definition":"Aquatic animal used for food.","type":"noun","examples":["bake the fish.","fresh fish is best."]},
+    "egg": {"definition":"An edible egg from birds, often chicken.","type":"noun","examples":["boil an egg.","eggs for breakfast."]},
+    "milk": {"definition":"White liquid produced by mammals, used as a drink.","type":"noun","examples":["pour the milk.","milk in coffee."]},
+    "coffee": {"definition":"A brewed drink from roasted coffee beans.","type":"noun","examples":["i drink coffee.","black coffee or with milk."]},
+    "tea": {"definition":"A drink made by infusing leaves in hot water.","type":"noun","examples":["a cup of tea.","green tea is common."]},
+    "soup": {"definition":"Liquid dish typically served warm.","type":"noun","examples":["eat the soup.","chicken soup helps."]},
+    "salad": {"definition":"A mixture of raw vegetables or fruits.","type":"noun","examples":["i made a salad.","salad with dressing."]},
+
+    # Action verbs (common)
+    "eat": {"definition":"Put food into the mouth and swallow.","type":"verb","examples":["i eat lunch.","eat slowly."]},
+    "drink": {"definition":"Take liquid into the mouth and swallow.","type":"verb","examples":["drink water.","drink some juice."]},
+    "cook": {"definition":"Prepare food by heating.","type":"verb","examples":["cook dinner.","learn to cook."]},
+    "bake": {"definition":"Cook food by dry heat in an oven.","type":"verb","examples":["bake a cake.","bake bread."]},
+    "fry": {"definition":"Cook in hot fat or oil.","type":"verb","examples":["fry the onions.","fry eggs."]},
+    "boil": {"definition":"Heat a liquid until it bubbles.","type":"verb","examples":["boil water.","boil the pasta."]},
+    "chop": {"definition":"Cut into small pieces.","type":"verb","examples":["chop the onion.","chop vegetables."]},
+    "slice": {"definition":"Cut into thin pieces.","type":"verb","examples":["slice bread.","slice the tomato."]},
+    "mix": {"definition":"Combine ingredients together.","type":"verb","examples":["mix the batter.","mix well."]},
+    "stir": {"definition":"Move a spoon around in a liquid.","type":"verb","examples":["stir the soup.","stir gently."]},
+    "serve": {"definition":"Present food for eating.","type":"verb","examples":["serve the meal.","serve warm."]},
+    "taste": {"definition":"Sample food to evaluate flavor.","type":"verb","examples":["taste the sauce.","taste before seasoning."]},
+
+    # Movement / general action verbs
+    "walk": {"definition":"Move at a regular pace by lifting and setting down each foot.","type":"verb","examples":["walk to school.","we walk together."]},
+    "run": {"definition":"Move rapidly on foot.","type":"verb","examples":["run fast.","he runs every morning."]},
+    "jump": {"definition":"Push oneself off a surface into the air.","type":"verb","examples":["jump high.","the child jumped."]},
+    "sit": {"definition":"Adopt a seated position.","type":"verb","examples":["please sit down.","sit on the chair."]},
+    "stand": {"definition":"Adopt an upright position on the feet.","type":"verb","examples":["stand up.","she stood still."]},
+    "drive": {"definition":"Operate and control a vehicle.","type":"verb","examples":["drive carefully.","he drives to work."]},
+    "sleep": {"definition":"A natural periodic state of rest.","type":"verb","examples":["sleep early.","i sleep eight hours."]},
+
+    # Pronouns & determiners
+    "he": {"definition":"Third-person singular male pronoun.","type":"pronoun","examples":["he is here.","he likes coffee."]},
+    "she": {"definition":"Third-person singular female pronoun.","type":"pronoun","examples":["she smiled.","she cooks well."]},
+    "they": {"definition":"Third-person plural pronoun.","type":"pronoun","examples":["they are ready.","they have ideas."]},
+    "them": {"definition":"Objective form of they.","type":"pronoun","examples":["give it to them.","i told them."]},
+    "his": {"definition":"Belonging to him.","type":"pronoun","examples":["his book.","that is his."]},
+    "her": {"definition":"Belonging to her or objective pronoun.","type":"pronoun","examples":["her phone.","i called her."]},
+    "their": {"definition":"Belonging to them.","type":"pronoun","examples":["their home.","their opinion matters."]},
+    "my": {"definition":"Belonging to me.","type":"pronoun","examples":["my idea.","my bag."]},
+    "your": {"definition":"Belonging to you.","type":"pronoun","examples":["your turn.","your coat."]},
+    "our": {"definition":"Belonging to us.","type":"pronoun","examples":["our project.","our house."]},
+
+    # Common nouns
+    "table": {"definition":"A piece of furniture with a flat top and legs.","type":"noun","examples":["place the book on the table.","the table is round."]},
+    "chair": {"definition":"A separate seat for one person.","type":"noun","examples":["sit on the chair.","a broken chair."]},
+    "window": {"definition":"An opening in a wall for light and air.","type":"noun","examples":["open the window.","a window view."]},
+    "door": {"definition":"A movable barrier that allows entry.","type":"noun","examples":["close the door.","the door was locked."]},
+    "phone": {"definition":"A device for voice and data communication.","type":"noun","examples":["answer the phone.","her phone rang."]},
+    "computer": {"definition":"An electronic device that processes data.","type":"noun","examples":["use the computer.","the computer is slow."]},
+    "book": {"definition":"A set of pages bound together containing text or images.","type":"noun","examples":["read a book.","the book is new."]},
+    "city": {"definition":"A large and densely populated urban area.","type":"noun","examples":["the city is busy.","visit the city."]},
+    "school": {"definition":"An institution for education.","type":"noun","examples":["go to school.","the school is closed."]},
+    "market": {"definition":"A place where goods are bought and sold.","type":"noun","examples":["visit the market.","the market is crowded."]},
+
+    # Adjectives (descriptive)
+    "delicious": {"definition":"Highly pleasant to taste.","type":"adj","examples":["the soup is delicious.","a delicious meal."]},
+    "spicy": {"definition":"Having strong seasoning.","type":"adj","examples":["the curry is spicy.","spicy food is hot."]},
+    "fresh": {"definition":"Recently made or obtained; not stale.","type":"adj","examples":["fresh bread.","fresh vegetables."]},
+    "hot": {"definition":"Having a high temperature.","type":"adj","examples":["the coffee is hot.","hot weather."]},
+    "cold": {"definition":"At a low temperature.","type":"adj","examples":["cold water.","the room is cold."]},
+    "sweet": {"definition":"Having a sugary taste.","type":"adj","examples":["sweet dessert.","sweet and sour."]},
+    "bitter": {"definition":"Having a sharp taste.","type":"adj","examples":["bitter coffee.","bitter medicine."]},
+    "salty": {"definition":"Tasting of salt.","type":"adj","examples":["salty chips.","a salty soup."]},
+    "juicy": {"definition":"Full of juice and flavor.","type":"adj","examples":["a juicy steak.","juicy fruit."]},
+    "crispy": {"definition":"Pleasantly firm and makes a sound when bitten.","type":"adj","examples":["crispy fries.","crispy skin."]},
+
+    # Adverbs
+    "slowly": {"definition":"At a low speed.","type":"adv","examples":["walk slowly.","open slowly."]},
+    "quickly": {"definition":"At a fast speed.","type":"adv","examples":["finish quickly.","run quickly."]},
+    "carefully": {"definition":"With care.","type":"adv","examples":["drive carefully.","read carefully."]},
+    "happily": {"definition":"In a happy manner.","type":"adv","examples":["smile happily.","they lived happily."]},
+    "easily": {"definition":"Without difficulty.","type":"adv","examples":["solve easily.","easily done."]},
+    "quietly": {"definition":"In a quiet manner.","type":"adv","examples":["speak quietly.","sit quietly."]},
+
+    # Modals / auxiliaries / infinitive helpers
+    "to": {"definition":"Used to form infinitives.","type":"preverb","examples":["to eat, to sleep, to read."]},
+    "will": {"definition":"Modal indicating future tense.","type":"modal","examples":["i will go.","it will rain."]},
+    "would": {"definition":"Modal used for conditional or polite requests.","type":"modal","examples":["would you like some?","i would help."]},
+    "should": {"definition":"Modal indicating advice or expectation.","type":"modal","examples":["you should rest.","we should try."]},
+    "can": {"definition":"Modal indicating ability or permission.","type":"modal","examples":["can you help?","we can try."]},
+    "could": {"definition":"Modal used as past ability or polite request.","type":"modal","examples":["could you pass that?","i could go."]},
+
+    # Conjunctions / prepositions (more)
+    "before": {"definition":"Earlier than.","type":"prep","examples":["finish before noon.","before you leave."]},
+    "after": {"definition":"Later than.","type":"prep","examples":["after dinner.","after the show."]},
+    "because": {"definition":"For the reason that.","type":"conj","examples":["i stayed because it rained.","because it's late."]},
+    "although": {"definition":"Despite the fact that.","type":"conj","examples":["although it's cold, we went.","although tired, she smiled."]},
+
+    # Short function words & punctuation-friendly tokens
+    "yes": {"definition":"Affirmative response.","type":"word","examples":["yes, please.","yes I agree."]},
+    "no": {"definition":"Negative response.","type":"word","examples":["no thanks.","no, I disagree."]},
+    "okay": {"definition":"Expression of agreement or acceptance.","type":"word","examples":["okay, let's go.","okay then."]},
+}
+
+# integrate these into BASE_DICT (do not overwrite existing keys)
+for k,v in extra_words.items():
+    if k not in BASE_DICT:
+        BASE_DICT[k] = v
+
+
 # merge external dictionary file if present at startup
 if os.path.exists(DICT_FILE):
     ext = load_json(DICT_FILE, {})
