@@ -635,8 +635,8 @@ def generate_large_dictionary(min_entries: int=2000):
 # -------------------------
 # UI & controls
 # -------------------------
-st.set_page_config(page_title="Jack — Fast Start", layout="wide")
-st.title("Jack — Fast-start Offline AI")
+st.set_page_config(page_title="Omega-B             ", layout="wide")
+st.title("Omega-B")
 
 left, right = st.columns([3,1])
 
@@ -691,7 +691,7 @@ with left:
     st.subheader("Conversation")
     history = ai_state.get("conversations", [])[-200:]
     for m in history:
-        who = "You" if m.get("role","user")=="user" else "Jack"
+        who = "You" if m.get("role","user")=="user" else "Omega"
         t = m.get("time","")
         st.markdown(f"**{who}**  <span style='color:gray;font-size:12px'>{t}</span>", unsafe_allow_html=True)
         st.write(m.get("text",""))
