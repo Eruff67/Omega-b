@@ -499,7 +499,7 @@ def build_training(vocab: List[str]) -> List[Tuple[List[float], int]]:
     return data
 
 # -------------------------
-# Markov fallback generator (filtered to real words) - no annotations
+# Markov generator with light grammar preferences (drop-in replacement)
 # -------------------------
 class Markov:
     def __init__(self):
@@ -520,14 +520,12 @@ class Markov:
             self.map[key][nxt] = self.map[key].get(nxt, 0) + 1
 
     def _best_choice(self, choices):
-        """Return the most likely next token (argmax)."""
         if not choices:
             return None
         best = max(sorted(choices.items()), key=lambda kv: kv[1])
         return best[0]
 
     def _valid_tokens_set(self):
-        """Return a set of 'real' tokens to prefer: merged dictionary tokens + vocab."""
         try:
             source_vocab = set(VOCAB) if VOCAB else set(build_vocab())
         except Exception:
@@ -542,7 +540,6 @@ class Markov:
         return source_vocab | dict_tokens
 
     def _is_real_word(self, tok, allowed_set):
-        # allow single-letter 'a' and 'i'
         if not re.fullmatch(r"[a-zA-Z']+", tok):
             return False
         if len(tok) == 1 and tok.lower() not in ("a","i"):
@@ -551,78 +548,190 @@ class Markov:
             return False
         return True
 
-    def _best_choice_filtered(self, choices):
-        """Pick the highest-count choice that also passes the 'real word' checks.
-           Fall back to unfiltered best choice if none pass."""
-        if not choices:
-            return None
-        allowed = self._valid_tokens_set()
-        filtered = [(w,c) for w,c in choices.items() if self._is_real_word(w, allowed)]
-        if filtered:
-            best = max(sorted(filtered), key=lambda kv: kv[1])
-            return best[0]
-        return self._best_choice(choices)
+    def _token_type(self, tok):
+        """Return a best-guess 'type' for token from merged_dictionary or simple heuristics."""
+        md = merged_dictionary()
+        # direct token match in multi-word keys or single-word keys
+        tok_l = tok.lower()
+        # check single-word dictionary entries first
+        for k,v in md.items():
+            if k == tok_l:
+                return v.get("type","")
+        # token may appear inside multiword key (prefer that)
+        for k,v in md.items():
+            if tok_l in tokenize(k):
+                return v.get("type","")
+        # heuristics: articles/prepositions/conjunctions/modals
+        if tok_l in ("a","an","the"):
+            return "article"
+        if tok_l in ("and","or","but"):
+            return "conj"
+        if tok_l in ("in","on","at","with","for","to","from","by","about"):
+            return "prep"
+        if tok_l in ("is","are","was","were","be","am","been","being","have","has","had","do","does","did","will","can","may","should","would","could"):
+            return "verb"
+        # short-word guess: single-letter i -> pronoun
+        if tok_l == "i":
+            return "pronoun"
+        return ""
 
-    def _best_unigram_after(self, token):
-        """Backoff: look for bigrams that start with token and choose most common follower overall,
-           but prefer 'real' words."""
-        candidates = {}
-        for (a,b), nxts in self.map.items():
-            if a == token:
-                for w,cnt in nxts.items():
-                    candidates[w] = candidates.get(w,0) + cnt
-        if not candidates:
-            return None
-        filt = [(w,c) for w,c in candidates.items() if self._is_real_word(w, self._valid_tokens_set())]
-        if filt:
-            best = max(sorted(filt), key=lambda kv: kv[1])
-            return best[0]
-        return self._best_choice(candidates)
+    def _pos_score(self, prev_tok, prev_prev_tok, candidate):
+        """
+        Lightweight POS preference:
+         - pronoun/noun -> prefer verb or modal next
+         - article -> prefer adjective or noun
+         - adjective -> prefer noun or adverb
+         - verb -> prefer adverb or noun or pronoun (object)
+         - preposition -> prefer determiner/adjective/noun/pronoun
+         - conjunction -> prefer noun/pronoun/verb
+        Returns a small bonus to add to raw counts.
+        """
+        cand_type = self._token_type(candidate)
+        prev_type = self._token_type(prev_tok) if prev_tok else ""
+        prevprev_type = self._token_type(prev_prev_tok) if prev_prev_tok else ""
+
+        # default no bonus
+        bonus = 0.0
+
+        # pronoun or noun tends to be followed by verb/modal or preposition
+        if prev_type in ("pronoun","noun","place","person") or prevprev_type in ("pronoun","noun"):
+            if cand_type in ("verb","modal","prep"):
+                bonus += 2.0
+        # articles prefer adjectives and nouns
+        if prev_type == "article":
+            if cand_type in ("adj","noun","place","person","phrase"):
+                bonus += 2.5
+        # adjectives prefer nouns or adverbs
+        if prev_type == "adj":
+            if cand_type in ("noun","place","person","adv"):
+                bonus += 1.8
+        # verbs often followed by nouns/adverbs/pronouns
+        if prev_type == "verb" or prev_type in ("modal","aux"):
+            if cand_type in ("noun","pronoun","adv","adj","phrase"):
+                bonus += 1.5
+        # prepositions prefer determiners/pronouns/nouns/adjectives
+        if prev_type == "prep":
+            if cand_type in ("article","pronoun","noun","adj","phrase"):
+                bonus += 2.2
+        # conjunctions often connect clauses: prefer pronoun/noun/verb
+        if prev_type == "conj":
+            if cand_type in ("pronoun","noun","verb","phrase"):
+                bonus += 1.6
+        # phrase tokens (like "i think", "there is") often followed by phrase continuation
+        if prev_type == "phrase":
+            if cand_type in ("verb","noun","adj","adv","phrase"):
+                bonus += 1.6
+
+        # small preference for known dictionary types (non-empty)
+        if cand_type:
+            bonus += 0.1
+
+        return bonus
+
+    def _rank_candidates(self, key, prev_key):
+        """Return list of (candidate,score) sorted by score, using counts + pos preference + real-word filter."""
+        choices = self.map.get(key, {})
+        if not choices:
+            return []
+        allowed = self._valid_tokens_set()
+        scored = []
+        for w,count in choices.items():
+            # prefer real words; if not real, skip normally
+            if not self._is_real_word(w, allowed):
+                continue
+            # pos bonus uses last token and the previous token from key
+            prev_tok = key[1]
+            prev_prev_tok = key[0]
+            bonus = self._pos_score(prev_tok, prev_prev_tok, w)
+            score = count + bonus
+            scored.append((w, score))
+        # fallback: if we filtered everything out, allow unfiltered best choices but still rank by raw count
+        if not scored:
+            for w,count in choices.items():
+                score = count
+                scored.append((w, score))
+        scored.sort(key=lambda kv: kv[1], reverse=True)
+        return scored
+
+    def _finalize_sentence(self, words):
+        """Post-process: capitalize first word, fix spacing/punctuation, append period if needed."""
+        if not words:
+            return ""
+        s = " ".join(words)
+        # remove space before punctuation
+        s = re.sub(r"\s+([,\.\?!;:])", r"\1", s)
+        # collapse multiple spaces
+        s = re.sub(r"\s{2,}", " ", s).strip()
+        # capitalize first character
+        s = s[0].upper() + s[1:] if s else s
+        # ensure sentence ends with punctuation
+        if not re.search(r"[\.!\?]$", s):
+            s = s + "."
+        return s
 
     def generate(self, seed=None, max_words=40):
         """
-        Deterministic greedy generation with 'real word' filtering:
-         - If seed has >=2 tokens and we have a matching bigram, greedily pick the most likely next real word
-           and repeat using the last two words each step, returning only the NEW words (continuation).
-         - Back off to a unigram-after-last-token heuristic if exact bigram missing.
-         - If no seed or nothing found, produce a full sentence from a random start (still preferring real words).
+        Grammar-aware deterministic greedy generator:
+         - If seed has >=2 tokens and we have a matching bigram, greedily pick the top-ranked candidate
+           by (count + POS preference) and continue.
+         - Otherwise generate from a random start, but still apply POS preferences.
+         - Post-process to fix capitalization and punctuation.
         """
+        # continuation mode when seed given
         if seed:
             toks = tokenize(seed)
             if len(toks) >= 2:
                 key = (toks[-2].lower(), toks[-1].lower())
                 continuation = []
                 for _ in range(max_words):
-                    if key in self.map:
-                        nxt = self._best_choice_filtered(self.map[key])
-                    else:
-                        nxt = self._best_unigram_after(key[1])
-                    if not nxt:
-                        break
+                    ranked = self._rank_candidates(key, None)
+                    if not ranked:
+                        # backoff: try any unigram following prev token
+                        # build synthetic choices from keys that start with key[1]
+                        candidates = {}
+                        for (a,b), nxts in self.map.items():
+                            if a == key[1]:
+                                for w,cnt in nxts.items():
+                                    candidates[w] = candidates.get(w,0) + cnt
+                        if not candidates:
+                            break
+                        # convert to ranked list with pos preference
+                        temp_key = (key[1], "__BACKOFF__")
+                        # monkeypatch map temporarily to reuse ranking function logic:
+                        self.map[temp_key] = candidates
+                        ranked = self._rank_candidates(temp_key, None)
+                        self.map.pop(temp_key, None)
+                        if not ranked:
+                            break
+                    nxt = ranked[0][0]
                     # safety: avoid short-token loops
                     if len(continuation) >= 2 and continuation[-1] == nxt and len(nxt) <= 2:
                         break
                     continuation.append(nxt)
                     key = (key[1], nxt)
                 if continuation:
-                    return " ".join(continuation)
-        # No seed or couldn't continue: generate full sentence preferring real words
+                    # finalize grammar for continuation alone (capitalize first word if it's a sentence)
+                    return self._finalize_sentence(continuation)
+        # No seed or can't continue: build full sentence from a start bigram
         if not self.starts:
             return ""
         key = random.choice(self.starts)
         out = [key[0], key[1]]
         for _ in range(max_words-2):
-            choices = self.map.get((out[-2], out[-1]))
-            if not choices:
+            ranked = self._rank_candidates((out[-2], out[-1]), None)
+            if not ranked:
                 break
-            nxt = self._best_choice_filtered(choices)
-            if not nxt:
-                break
+            nxt = ranked[0][0]
             out.append(nxt)
-            if len(out) >= 3 and out[-1] == out[-2] == out[-3]:
+            # avoid trivial repeating loops
+            if len(out) >= 5 and out[-1] == out[-2] == out[-3]:
                 break
-        return " ".join(out)
+            # stop early if punctuation token appended (rare, but helps)
+            if re.fullmatch(r"[\.!\?;,]", nxt):
+                break
+        return self._finalize_sentence(out)
 
+# instantiate
 MARKOV = Markov()
 
 def markov_serialize(m):
