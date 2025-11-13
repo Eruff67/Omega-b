@@ -861,7 +861,7 @@ def ingest_text_content(name: str, text: str, save_as_memory: bool=True):
 # -------------------------
 # UI: Streamlit
 # -------------------------
-st.set_page_config(page_title="Omega-B", layout="wide")
+st.set_page_config(page_title="Omega-B", layout="wide", page_icon="✨")
 st.title("Omega-B (V2.2)")
 
 left, right = st.columns([3,1])
