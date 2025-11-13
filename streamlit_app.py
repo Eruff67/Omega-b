@@ -1,8 +1,8 @@
-# jack_offline_saved_memory_full.py
-# Jack — Offline AI with persistent memory, expanded KB, grammar-aware Markov, and Streamlit UI
+# jack_offline_saved_memory_with_corpus.py
+# Jack — Offline AI with persistent memory, large KB, grammar-aware Markov, and a 500-sentence corpus
 # Run:
 #   pip install streamlit
-#   streamlit run jack_offline_saved_memory_full.py
+#   streamlit run jack_offline_saved_memory_with_corpus.py
 
 import streamlit as st
 import json
@@ -46,6 +46,62 @@ WORD_RE = re.compile(r"[A-Za-z']+|[.,!?:;]")
 
 def tokenize(text: str) -> List[str]:
     return WORD_RE.findall((text or "").lower())
+
+# -------------------------
+# Generate a 500-sentence curated corpus (programmatic, varied)
+# -------------------------
+def generate_corpus() -> List[str]:
+    nouns = ["cat","dog","child","city","teacher","student","computer","book","car","river","mountain","friend","idea","moment","problem","day","night","house","garden","sky"]
+    verbs = ["saw","likes","loves","found","reads","writes","drives","walks","jumps","learns","teaches","knows","understands","creates","builds","says","thinks","wonders","watches","helps"]
+    adjectives = ["quick","slow","bright","dark","happy","sad","quiet","loud","old","young","strong","weak","big","small","warm","cold","sharp","soft","clear","noisy"]
+    adverbs = ["quickly","slowly","carefully","easily","often","always","sometimes","rarely","never","happily","sadly","quietly","loudly","brightly","calmly"]
+    preps = ["in","on","at","with","for","about","under","over","between","near","behind","across","through"]
+    starters = ["in the morning","at night","yesterday","today","tomorrow","last week","this week","every day","sometimes","usually"]
+    puncts = [".", ".", ".", "!", "?", ";", ":" ]  # make period more likely
+
+    corpus = []
+    i = 1
+    # mix of statement, question, exclamation, clause sentences
+    while len(corpus) < 500:
+        t = i % 10
+        if t == 1:
+            # simple declarative: "the ADJ NOUN VERB the NOUN."
+            s = f"the {random.choice(adjectives)} {random.choice(nouns)} {random.choice(verbs)} the {random.choice(nouns)}{random.choice(puncts)}"
+        elif t == 2:
+            # temporal clause + statement
+            s = f"{random.choice(starters)}, the {random.choice(nouns)} {random.choice(verbs)} {random.choice(adverbs)}{random.choice(puncts)}"
+        elif t == 3:
+            # question: "do you VERB the NOUN?"
+            s = f"do you {random.choice(verbs)} the {random.choice(nouns)}?"
+        elif t == 4:
+            # exclamation
+            s = f"what a {random.choice(adjectives)} {random.choice(nouns)}!"
+        elif t == 5:
+            # prepositional phrase + verb
+            s = f"{random.choice(preps).capitalize()} the {random.choice(nouns)}, she {random.choice(verbs)}{random.choice(puncts)}"
+        elif t == 6:
+            # compound: "The NOUN is ADJ, and the NOUN is ADJ."
+            s = f"the {random.choice(nouns)} is {random.choice(adjectives)}, and the {random.choice(nouns)} is {random.choice(adjectives)}{random.choice(puncts)}"
+        elif t == 7:
+            # imperative: "Please VERB the NOUN."
+            s = f"please {random.choice(verbs)} the {random.choice(nouns)}{random.choice(puncts)}"
+        elif t == 8:
+            # comparative phrase
+            s = f"the {random.choice(nouns)} is more {random.choice(adjectives)} than the {random.choice(nouns)}{random.choice(puncts)}"
+        elif t == 9:
+            # colon / list style
+            s = f"remember: {random.choice(nouns)}, {random.choice(nouns)}, and {random.choice(nouns)}."
+        else:
+            # balanced sentence with adverb
+            s = f"the {random.choice(nouns)} {random.choice(verbs)} {random.choice(adverbs)}{random.choice(puncts)}"
+        # small cleanups: ensure single spaces, lowercase, strip
+        s = re.sub(r"\s+", " ", s).strip().lower()
+        # ensure punctuation present at end (most templates include)
+        if not re.search(r"[.!?;:]$", s):
+            s = s + "."
+        corpus.append(s)
+        i += 1
+    return corpus
 
 # -------------------------
 # Expanded embedded dictionary (examples & types help grammar)
@@ -121,6 +177,9 @@ BASE_DICT = {
     "person": {"definition":"A human being.","type":"noun","examples":["she is a kind person.","every person matters."]},
 }
 
+# add generated corpus as a single entry so examples are picked up by Markov
+BASE_DICT["__corpus__"] = {"definition": "500-sentence curated corpus to improve Markov grammar and transitions", "type": "corpus", "examples": generate_corpus()}
+
 # merge external dictionary file if present at startup
 if os.path.exists(DICT_FILE):
     ext = load_json(DICT_FILE, {})
@@ -138,7 +197,6 @@ def merged_dictionary() -> Dict[str, Dict[str,Any]]:
 # Large KB (many Q->A pairs)
 # -------------------------
 KB = {
-    # History & dates
     "who was the first president of the united states": "George Washington (1789–1797).",
     "who was the first us president": "George Washington (1789–1797).",
     "who was the 16th president of the united states": "Abraham Lincoln (1861–1865).",
@@ -149,7 +207,6 @@ KB = {
     "when did world war ii end": "World War II ended in 1945.",
     "who discovered america": "Christopher Columbus's 1492 voyage reached the Americas for Europe; indigenous peoples lived there long before.",
     "who discovered penicillin": "Alexander Fleming is credited with discovering penicillin in 1928.",
-    # Capitals & countries
     "capital of france": "Paris.",
     "capital of germany": "Berlin.",
     "capital of spain": "Madrid.",
@@ -162,11 +219,6 @@ KB = {
     "capital of china": "Beijing.",
     "capital of japan": "Tokyo.",
     "capital of india": "New Delhi.",
-    "which country has the largest population": "China (followed closely by India).",
-    "which is the largest country by area": "Russia is the largest country by area.",
-    "which continent is brazil in": "Brazil is in South America.",
-    "what is the largest ocean": "The Pacific Ocean.",
-    # Science & nature
     "what is gravity": "Gravity is the force by which objects with mass attract each other (≈9.81 m/s² near Earth's surface).",
     "what is photosynthesis": "A process by which plants convert light energy into chemical energy, producing oxygen and glucose from CO₂ and water.",
     "what is the largest planet": "Jupiter.",
@@ -175,36 +227,28 @@ KB = {
     "how far is the earth from the sun": "About 1 astronomical unit ≈ 149.6 million kilometers (≈93 million miles).",
     "what is dna": "DNA (deoxyribonucleic acid) stores genetic information in living organisms.",
     "what is rna": "RNA (ribonucleic acid) is involved in coding, decoding, regulation, and expression of genes.",
-    # Math & constants
     "what is pi": "Pi (π) ≈ 3.141592653589793 — the ratio of a circle's circumference to its diameter.",
     "what is e": "Euler's number e ≈ 2.718281828 — the base of natural logarithms.",
     "what is the speed of light": "Approximately 299,792,458 meters per second in vacuum.",
     "what is avogadros number": "Avogadro's number ≈ 6.02214076 × 10^23 (particles per mole).",
     "what is 2 plus 2": "2 + 2 = 4.",
-    # Units & conversions
     "how many centimeters in a meter": "100 centimeters in 1 meter.",
     "how many meters in a kilometer": "1000 meters in 1 kilometer.",
     "how many inches in a foot": "12 inches in 1 foot.",
     "how many ounces in a pound": "16 ounces in 1 pound (avoirdupois).",
     "convert celsius to fahrenheit": "°F = °C × 9/5 + 32.",
-    # Biology & health (general info)
     "what is a fever": "A fever is a raised body temperature, often a sign of infection. Adults: temps above ~38°C (100.4°F).",
     "what is dehydration": "A condition when the body loses more fluids than it takes in; symptoms include thirst and dizziness.",
-    # Computers & technology
     "what is python": "Python is a high-level programming language known for readability and wide use in scripting and data science.",
     "what is an api": "An API (Application Programming Interface) allows software systems to communicate and exchange data.",
     "what is machine learning": "A field of AI where models learn patterns from data to make predictions or decisions.",
-    # Literature & arts
     "who wrote hamlet": "William Shakespeare.",
     "who painted the mona lisa": "Leonardo da Vinci.",
-    # Geography & travel
     "what is the highest mountain": "Mount Everest is the highest mountain above sea level (≈8,848 m).",
     "what is the longest river": "The Nile and Amazon are both contenders depending on measurement method; commonly the Nile is cited as the longest.",
     "what currency does the united states use": "United States dollar (USD).",
     "what language is spoken in brazil": "Portuguese is the official language of Brazil.",
-    # Food & cooking
     "how do i boil an egg": "Place eggs in boiling water and cook 6–8 minutes for medium, 9–12 minutes for hard; cool in cold water to stop cooking.",
-    # Short definitions and misc
     "definition of computer": "An electronic device that processes data according to programmed instructions.",
     "definition of algorithm": "A step-by-step procedure for solving a problem or performing a task.",
     "what is the boiling point of water": "100 °C (212 °F) at standard atmospheric pressure (sea level).",
@@ -213,11 +257,9 @@ KB = {
     "how many minutes in an hour": "60 minutes.",
     "how many hours in a day": "24 hours.",
     "how many days in a year": "365 days (366 in a leap year).",
-    # fallback extra keys
     "who is elon musk": "Entrepreneur (SpaceX, Tesla, and more).",
     "who is barack obama": "44th President of the United States (2009–2017).",
     "who is albert einstein": "Physicist known for the theory of relativity.",
-    # Add more keys here if you want...
 }
 
 # -------------------------
@@ -566,7 +608,7 @@ def train_markov_full():
     except Exception:
         pass
 
-# load persisted markov if available
+# try load persisted markov on startup (fast)
 try:
     mser = load_json(MARKOV_FILE, None)
     if mser and isinstance(mser, dict) and "map" in mser:
@@ -820,7 +862,7 @@ def ingest_text_content(name: str, text: str, save_as_memory: bool=True):
 # UI: Streamlit
 # -------------------------
 st.set_page_config(page_title="Jack — Offline AI (Persistent Memory)", layout="wide")
-st.title("Jack — Offline AI (Persistent Memory) — Full")
+st.title("Jack — Offline AI (Persistent Memory) — With 500-sentence Corpus")
 
 left, right = st.columns([3,1])
 
