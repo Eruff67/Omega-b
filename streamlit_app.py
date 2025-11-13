@@ -1,9 +1,9 @@
-# jack_offline_full.py
-# Jack — Offline AI with persistent memory, expanded KB, grammar-aware Markov,
-# 500-sentence corpus, topic-aware paragraph generation, and Streamlit UI
+# jack_offline_full_big_dict.py
+# Full single-file Streamlit app: persistent memory, ~2000-word dictionary, KB, grammar-aware Markov,
+# paragraph/topic generation, TinyNN intent classifier, ingestion, import/export.
 # Run:
 #   pip install streamlit
-#   streamlit run jack_offline_full.py
+#   streamlit run jack_offline_full_big_dict.py
 
 import streamlit as st
 import json
@@ -40,7 +40,7 @@ def save_json(path: str, data):
 ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings": {}, "model_meta": {}, "model_dirty": False})
 
 # -------------------------
-# Tokenization (keeps punctuation tokens separate)
+# Tokenization (separate punctuation tokens)
 # -------------------------
 WORD_RE = re.compile(r"[A-Za-z']+|[.,!?:;]")
 
@@ -48,7 +48,7 @@ def tokenize(text: str) -> List[str]:
     return WORD_RE.findall((text or "").lower())
 
 # -------------------------
-# Build a curated 500-sentence corpus programmatically
+# Build a curated 500-sentence corpus (used as examples)
 # -------------------------
 def generate_corpus() -> List[str]:
     nouns = ["cat","dog","child","city","teacher","student","computer","book","car","river","mountain","friend","idea","moment","problem","day","night","house","garden","sky"]
@@ -57,7 +57,7 @@ def generate_corpus() -> List[str]:
     adverbs = ["quickly","slowly","carefully","easily","often","always","sometimes","rarely","never","happily","sadly","quietly","loudly","brightly","calmly"]
     preps = ["in","on","at","with","for","about","under","over","between","near","behind","across","through"]
     starters = ["in the morning","at night","yesterday","today","tomorrow","last week","this week","every day","sometimes","usually"]
-    puncts = [".", ".", ".", "!", "?", ";", ":" ]  # period more likely
+    puncts = [".", ".", ".", "!", "?", ";", ":" ]
 
     corpus = []
     i = 1
@@ -91,245 +91,158 @@ def generate_corpus() -> List[str]:
     return corpus
 
 # -------------------------
-# Base dictionary (expanded) + add corpus as examples under __corpus__
-# -------------------------
-BASE_DICT = {
-    "i": {"definition":"First-person pronoun.","type":"pronoun","examples":["i went home.","i think that's correct."]},
-    "you": {"definition":"Second-person pronoun.","type":"pronoun","examples":["you are kind.","can you help me?"]},
-    "we": {"definition":"First-person plural pronoun.","type":"pronoun","examples":["we agree.","we will go tomorrow."]},
-    "the": {"definition":"Definite article.","type":"article","examples":["the book is on the table.","the sky is blue."]},
-    "a": {"definition":"Indefinite article.","type":"article","examples":["a dog barked.","a good idea."]},
-    "be": {"definition":"Exist, occur, or have a specified quality.","type":"verb","examples":["i want to be helpful.","there will be a meeting."]},
-    "have": {"definition":"Possess or own.","type":"verb","examples":["i have a plan.","they have several options."]},
-    "do": {"definition":"Perform an action.","type":"verb","examples":["do your best.","what did you do?"]},
-    "say": {"definition":"Utter words.","type":"verb","examples":["please say it clearly.","they say it's fine."]},
-    "go": {"definition":"Move from one place to another.","type":"verb","examples":["let's go now.","she goes to work."]},
-    "get": {"definition":"Obtain, receive.","type":"verb","examples":["get some rest.","i got your message."]},
-    "make": {"definition":"Create or form.","type":"verb","examples":["make a list.","we make progress."]},
-    "know": {"definition":"Have knowledge or information.","type":"verb","examples":["i know the answer.","do you know him?"]},
-    "think": {"definition":"Use reasoning or intuition.","type":"verb","examples":["i think it's right.","she thinks often."]},
-    "time": {"definition":"A continuous quantity in which events occur.","type":"noun","examples":["time flies.","what time is it?"]},
-    "day": {"definition":"A 24-hour period.","type":"noun","examples":["today is a good day.","we worked all day."]},
-    "world": {"definition":"The earth and its inhabitants.","type":"noun","examples":["the world is changing.","she traveled the world."]},
-    "life": {"definition":"Existence of living beings.","type":"noun","examples":["life is precious.","he enjoys his life."]},
-    "idea": {"definition":"A thought or suggestion for possible action.","type":"noun","examples":["that's a good idea.","she shared an idea."]},
-    "problem": {"definition":"A matter needing solution.","type":"noun","examples":["we solved the problem.","this is a tricky problem."]},
-    "good": {"definition":"Having positive qualities.","type":"adj","examples":["a good idea.","she is good at it."]},
-    "new": {"definition":"Not existing before.","type":"adj","examples":["a new book.","this is new."]},
-    "first": {"definition":"Coming before others.","type":"adj","examples":["the first step.","he was first in line."]},
-    "other": {"definition":"Different or distinct from the one mentioned.","type":"adj","examples":["the other person.","on the other hand."]},
-    "important": {"definition":"Of great significance.","type":"adj","examples":["important work.","this is important."]},
-    "very": {"definition":"To a high degree.","type":"adv","examples":["very good.","very quickly."]},
-    "often": {"definition":"Frequently.","type":"adv","examples":["we often meet.","he often calls."]},
-    "always": {"definition":"At all times.","type":"adv","examples":["she always smiles.","always check facts."]},
-    "sometimes": {"definition":"Occasionally.","type":"adv","examples":["sometimes i read.","we sometimes travel."]},
-    "however": {"definition":"Used to introduce a contrast.","type":"adv","examples":["however, it may fail.","we tried; however it didn't work."]},
-    "then": {"definition":"At that time; next.","type":"adv","examples":["then we left.","finish, then rest."]},
-    "in": {"definition":"Expressing location or position.","type":"prep","examples":["in the room.","living in the city."]},
-    "on": {"definition":"Positioned above and in contact with.","type":"prep","examples":["on the table.","on monday."]},
-    "at": {"definition":"Used for specific times/places.","type":"prep","examples":["at noon.","meet at the park."]},
-    "with": {"definition":"Accompanied by.","type":"prep","examples":["with a friend.","cut with a knife."]},
-    "for": {"definition":"With the purpose of.","type":"prep","examples":["for example.","i did it for you."]},
-    "and": {"definition":"Conjunction joining words or phrases.","type":"conj","examples":["bread and butter.","he and she."]},
-    "but": {"definition":"Conjunction showing contrast.","type":"conj","examples":["i like it but...","it was small but useful."]},
-    "or": {"definition":"Conjunction indicating alternatives.","type":"conj","examples":["tea or coffee?","now or later."]},
-    "if": {"definition":"Introducing a conditional clause.","type":"conj","examples":["if it rains, we'll stay.","ask if needed."]},
-    "will": {"definition":"Modal verb indicating future.","type":"modal","examples":["i will go.","she will join."]},
-    "can": {"definition":"Modal verb indicating ability or possibility.","type":"modal","examples":["can you help?","it can work."]},
-    "there is": {"definition":"Used to state existence.","type":"phrase","examples":["there is a way to solve it.","there is a message for you."]},
-    "i think": {"definition":"Phrase expressing opinion.","type":"phrase","examples":["i think we should go.","i think it's correct."]},
-    "for example": {"definition":"Used to give an example.","type":"phrase","examples":["many fruits, for example apples, are healthy."]},
-    "in order to": {"definition":"With the purpose to.","type":"phrase","examples":["in order to learn, practice is required."]},
-    "paris": {"definition":"Capital city of France.","type":"place","examples":["paris is beautiful in spring.","i visited paris."]},
-    "python": {"definition":"A high-level programming language.","type":"noun","examples":["i wrote the script in python.","python is popular."]},
-    "gravity": {"definition":"Force attracting objects to one another.","type":"noun","examples":["gravity keeps us grounded.","gravity affects motion."]},
-    "pi": {"definition":"Mathematical constant ≈ 3.14159.","type":"number","examples":["pi is used to compute circumference."]},
-    "learn": {"definition":"Gain knowledge by study.","type":"verb","examples":["we learn from mistakes.","i want to learn more."]},
-    "help": {"definition":"Provide assistance.","type":"verb","examples":["can you help me?","thanks for the help."]},
-    "start": {"definition":"Begin doing something.","type":"verb","examples":["start now.","we start at nine."]},
-    "finish": {"definition":"Bring to an end.","type":"verb","examples":["finish the task.","he finished quickly."]},
-    "read": {"definition":"Look at and understand written words.","type":"verb","examples":["read the book.","i like to read."]},
-    "write": {"definition":"Mark letters to form words.","type":"verb","examples":["write a note.","she writes code."]},
-    "play": {"definition":"Take part in activity for enjoyment.","type":"verb","examples":["let's play a game.","they play music."]},
-    "quick": {"definition":"Moving fast.","type":"adj","examples":["a quick reply.","quick and simple."]},
-    "slow": {"definition":"Moving at a low speed.","type":"adj","examples":["a slow process.","don't be slow."]},
-    "happy": {"definition":"Feeling or showing pleasure.","type":"adj","examples":["she felt happy.","a happy ending."]},
-    "sad": {"definition":"Feeling sorrow.","type":"adj","examples":["a sad story.","don't be sad."]},
-    "carefully": {"definition":"With care or attention.","type":"adv","examples":["read carefully.","drive carefully."]},
-    "easily": {"definition":"Without difficulty.","type":"adv","examples":["it can be done easily.","she solved it easily."]},
-    "man": {"definition":"An adult male human.","type":"noun","examples":["the man waved.","he was a kind man."]},
-    "woman": {"definition":"An adult female human.","type":"noun","examples":["the woman smiled.","she is a strong woman."]},
-    "child": {"definition":"A young person.","type":"noun","examples":["the child laughed.","children play often."]},
-    "place": {"definition":"A particular position or point in space.","type":"noun","examples":["this is a good place.","where is the place?"]},
-    "person": {"definition":"A human being.","type":"noun","examples":["she is a kind person.","every person matters."]},
-    "i": {"definition":"first-person pronoun","type":"pronoun","examples":["i went home.","i think that's correct."]},
-    "you": {"definition":"second-person pronoun","type":"pronoun","examples":["you are kind.","can you help me?"]},
-    "the": {"definition":"definite article","type":"article","examples":["the book is on the table.","the sky is blue."]},
-    "a": {"definition":"indefinite article","type":"article","examples":["a dog barked.","a good idea."]},
-    "and": {"definition":"conjunction joining words or phrases","type":"conj","examples":["bread and butter.","he and she."]},
-    "but": {"definition":"conjunction showing contrast","type":"conj","examples":["i like it but...","it was small but useful."]}
-}
-# -------------------------
 # Programmatic large BASE_DICT generator (~2000+ words)
-# Paste/replace your existing BASE_DICT with this block
 # -------------------------
-import random
-def examples_for(word, typ):
-    if typ == "noun":
-        return [f"the {word} is on the table.", f"i saw a {word} yesterday."]
-    if typ == "verb":
-        return [f"i {word} every day.", f"please {word} carefully."]
-    if typ == "adj":
-        return [f"that is very {word}.", f"the {word} example."]
-    if typ == "adv":
-        return [f"do it {word}.", f"they moved {word}"]
-    if typ == "food":
-        return [f"i like {word}.", f"{word} is delicious."]
-    if typ == "place":
-        return [f"i visited {word}.", f"{word} is beautiful."]
-    if typ == "tech":
-        return [f"the {word} service crashed.", f"install {word} on the server."]
-    return [f"{word} example."]
+def build_large_base_dict(min_entries: int = 2000) -> Dict[str, Dict[str,Any]]:
+    def examples_for(word, typ):
+        if typ == "noun":
+            return [f"the {word} is on the table.", f"i saw a {word} yesterday."]
+        if typ == "verb":
+            return [f"i {word} every day.", f"please {word} carefully."]
+        if typ == "adj":
+            return [f"that is very {word}.", f"the {word} example."]
+        if typ == "adv":
+            return [f"do it {word}.", f"they moved {word}"]
+        if typ == "food":
+            return [f"i like {word}.", f"{word} is delicious."]
+        if typ == "place":
+            return [f"i visited {word}.", f"{word} is beautiful."]
+        if typ == "tech":
+            return [f"the {word} service crashed.", f"install {word} on the server."]
+        return [f"{word} example."]
 
-# small hand-picked core
+    BASE = {
+        "i": {"definition":"first-person pronoun","type":"pronoun","examples":["i went home.","i think that's correct."]},
+        "you": {"definition":"second-person pronoun","type":"pronoun","examples":["you are kind.","can you help me?"]},
+        "the": {"definition":"definite article","type":"article","examples":["the book is on the table.","the sky is blue."]},
+        "a": {"definition":"indefinite article","type":"article","examples":["a dog barked.","a good idea."]},
+        "and": {"definition":"conjunction","type":"conj","examples":["bread and butter.","he and she."]},
+        "but": {"definition":"conjunction showing contrast","type":"conj","examples":["i like it but...","it was small but useful."]}
+    }
 
-# curated seed lists (each list has many useful stems)
-animals = "cat dog horse cow sheep goat pig elephant tiger lion bear wolf fox deer monkey ape giraffe zebra kangaroo koala panda rabbit rat mouse bird eagle owl parrot duck goose swan pelican seal whale dolphin shark crow hen chicken rooster turkey ant bee butterfly spider crab lobster jellyfish octopus squid sealion".split()
-foods = "apple banana orange grape pear mango pineapple strawberry blueberry kiwi watermelon lemon lime cherry peach apricot plum pomegranate fig date coconut avocado tomato potato carrot lettuce spinach onion garlic pepper cucumber broccoli cabbage cauliflower mushroom bread cheese rice pasta pizza soup salad egg chicken beef pork lamb salmon tuna shrimp sausage yogurt butter".split()
-verbs = "eat drink cook bake fry boil chop slice mix stir serve taste walk run jump drive sleep read write play learn teach think know make get take give find see watch listen sing dance create build repair fix open close start stop continue choose decide remember forget speak ask answer buy sell pay sell order request call text email search".split()
-nouns = "table chair window door phone computer book city school market garden house friend family teacher student car river mountain road work shop store office station park bank hotel restaurant airport bridge town village island forest beach library museum stadium theater concert cafe bakery kitchen bedroom bathroom garage closet shelf lamp pillow blanket spoon fork knife plate cup glass bottle bag wallet key map ticket".split()
-adjectives = "delicious spicy fresh hot cold sweet bitter salty juicy crispy quick slow bright dark happy sad quiet loud young old strong weak big small warm clean dirty soft hard sharp round flat beautiful ugly easy difficult expensive cheap comfortable uncomfortable interesting boring friendly rude polite curious calm nervous excited".split()
-adverbs = "slowly quickly carefully easily often always sometimes rarely never happily sadly quietly loudly brightly calmly eagerly silently".split()
-places = "paris london berlin madrid rome tokyo beijing mumbai newyork washington ottawa canberra moscow beirut cairo sydney dubai singapore bangkok lisbon amsterdam prague vienna budapest".split()
-tech = "python java javascript html css server client api database sql cloud linux windows mac android ios app website robot ai ml data algorithm model network security encryption password username login logout thread process task queue cache buffer stream file folder path script program function variable object class module package".split()
-colors = "red blue green yellow orange purple pink brown black white gray silver gold beige teal cyan magenta maroon olive lime navy".split()
-body = "head face eye ear nose mouth tooth tongue neck shoulder arm elbow wrist hand finger thumb chest heart lung stomach back leg knee ankle foot toe".split()
-clothing = "shirt blouse t-shirt sweater jacket coat pants jeans shorts skirt dress tie socks shoes boots sandals hat cap gloves scarf belt".split()
-occupations = "doctor nurse teacher engineer lawyer accountant programmer manager chef baker driver pilot artist musician writer journalist farmer gardener electrician plumber carpenter mechanic scientist researcher".split()
-transport = "car bus train bicycle bike motorcycle airplane ship boat ferry truck van tram subway taxi".split()
-materials = "wood metal plastic glass stone brick concrete paper cloth leather rubber cotton silk wool linen".split()
-measurements = "meter centimeter kilometer gram kilogram liter ounce pound inch foot yard mile degree percent percent".split()
-emotions = "love hate fear anger joy surprise disgust trust anticipation hope worry envy pride shame guilt".split()
+    animals = "cat dog horse cow sheep goat pig elephant tiger lion bear wolf fox deer monkey ape giraffe zebra kangaroo koala panda rabbit rat mouse bird eagle owl parrot duck goose swan seal whale dolphin shark crow hen chicken rooster turkey ant bee butterfly spider crab lobster jellyfish octopus squid sealion".split()
+    foods = "apple banana orange grape pear mango pineapple strawberry blueberry kiwi watermelon lemon lime cherry peach apricot plum pomegranate fig date coconut avocado tomato potato carrot lettuce spinach onion garlic pepper cucumber broccoli cabbage cauliflower mushroom bread cheese rice pasta pizza soup salad egg chicken beef pork lamb salmon tuna shrimp sausage yogurt butter".split()
+    verbs = "eat drink cook bake fry boil chop slice mix stir serve taste walk run jump drive sleep read write play learn teach think know make get take give find see watch listen sing dance create build repair fix open close start stop continue choose decide remember forget speak ask answer buy sell pay order call text email search".split()
+    nouns = "table chair window door phone computer book city school market garden house friend family teacher student car river mountain road work shop store office station park bank hotel restaurant airport bridge town village island forest beach library museum stadium theater concert cafe bakery kitchen bedroom bathroom garage closet shelf lamp pillow blanket spoon fork knife plate cup glass bottle bag wallet key map ticket".split()
+    adjectives = "delicious spicy fresh hot cold sweet bitter salty juicy crispy quick slow bright dark happy sad quiet loud young old strong weak big small warm clean dirty soft hard sharp round flat beautiful ugly easy difficult expensive cheap comfortable uncomfortable interesting boring friendly rude polite curious calm nervous excited".split()
+    adverbs = "slowly quickly carefully easily often always sometimes rarely never happily sadly quietly loudly brightly calmly eagerly silently".split()
+    places = "paris london berlin madrid rome tokyo beijing mumbai newyork washington ottawa canberra moscow beirut cairo sydney dubai singapore bangkok lisbon amsterdam prague vienna budapest".split()
+    tech = "python java javascript html css server client api database sql cloud linux windows mac android ios app website robot ai ml data algorithm model network security encryption password username login logout thread process task queue cache buffer stream file folder path script program function variable object class module package".split()
+    colors = "red blue green yellow orange purple pink brown black white gray silver gold beige teal cyan magenta maroon olive lime navy".split()
+    body = "head face eye ear nose mouth tooth tongue neck shoulder arm elbow wrist hand finger thumb chest heart lung stomach back leg knee ankle foot toe".split()
+    clothing = "shirt blouse t-shirt sweater jacket coat pants jeans shorts skirt dress tie socks shoes boots sandals hat cap gloves scarf belt".split()
+    occupations = "doctor nurse teacher engineer lawyer accountant programmer manager chef baker driver pilot artist musician writer journalist farmer gardener electrician plumber carpenter mechanic scientist researcher".split()
+    transport = "car bus train bicycle bike motorcycle airplane ship boat ferry truck van tram subway taxi".split()
+    materials = "wood metal plastic glass stone brick concrete paper cloth leather rubber cotton silk wool linen".split()
+    measurements = "meter centimeter kilometer gram kilogram liter ounce pound inch foot yard mile degree percent".split()
+    emotions = "love hate fear anger joy surprise disgust trust anticipation hope worry envy pride shame guilt".split()
 
-# combine seeds
-seed_lists = [animals, foods, verbs, nouns, adjectives, adverbs, places, tech, colors, body, clothing, occupations, transport, materials, measurements, emotions]
+    seed_lists = [animals, foods, verbs, nouns, adjectives, adverbs, places, tech, colors, body, clothing, occupations, transport, materials, measurements, emotions]
+    all_stems = []
+    for lst in seed_lists:
+        for w in lst:
+            w = w.lower().replace(" ", "_")
+            if w not in all_stems:
+                all_stems.append(w)
 
-# helper morphological rules
-def make_plural(w):
-    if w.endswith(("s","x","z","ch","sh")):
-        return w + "es"
-    if w.endswith("y") and len(w) > 1 and w[-2] not in "aeiou":
-        return w[:-1] + "ies"
-    return w + "s"
+    # helpers
+    def make_plural(w):
+        if w.endswith(("s","x","z","ch","sh")):
+            return w + "es"
+        if w.endswith("y") and len(w) > 1 and w[-2] not in "aeiou":
+            return w[:-1] + "ies"
+        return w + "s"
+    def make_ing(w):
+        if w.endswith("ie"):
+            return w[:-2] + "ying"
+        if w.endswith("e") and not w.endswith("ee"):
+            return w[:-1] + "ing"
+        if len(w) >=3 and (w[-1] not in "aeiou" and w[-2] in "aeiou" and w[-3] not in "aeiou"):
+            return w + w[-1] + "ing"
+        return w + "ing"
+    def make_past(w):
+        if w.endswith("e"):
+            return w + "d"
+        if w.endswith("y") and len(w)>1 and w[-2] not in "aeiou":
+            return w[:-1] + "ied"
+        if len(w) >=3 and (w[-1] not in "aeiou" and w[-2] in "aeiou" and w[-3] not in "aeiou"):
+            return w + w[-1] + "ed"
+        return w + "ed"
+    def make_adv_from_adj(w):
+        if w.endswith("y"):
+            return w[:-1] + "ily"
+        if w.endswith("ic"):
+            return w + "ally"
+        return w + "ly"
 
-def make_ing(w):
-    if w.endswith("ie"):
-        return w[:-2] + "ying"
-    if w.endswith("e") and not w.endswith("ee"):
-        return w[:-1] + "ing"
-    if len(w) >=3 and (w[-1] not in "aeiou" and w[-2] in "aeiou" and w[-3] not in "aeiou"):
-        return w + w[-1] + "ing"
-    return w + "ing"
+    # populate base dict from seeds
+    for stem in all_stems:
+        if stem not in BASE:
+            typ = "noun"
+            if stem in verbs: typ = "verb"
+            elif stem in adjectives: typ = "adj"
+            elif stem in adverbs: typ = "adv"
+            elif stem in foods: typ = "food"
+            elif stem in places: typ = "place"
+            elif stem in tech: typ = "tech"
+            BASE[stem] = {"definition": f"a {typ} named '{stem.replace('_',' ')}'.", "type": typ, "examples": examples_for(stem.replace("_"," "), typ)}
 
-def make_past(w):
-    if w.endswith("e"):
-        return w + "d"
-    if w.endswith("y") and len(w)>1 and w[-2] not in "aeiou":
-        return w[:-1] + "ied"
-    if len(w) >=3 and (w[-1] not in "aeiou" and w[-2] in "aeiou" and w[-3] not in "aeiou"):
-        return w + w[-1] + "ed"
-    return w + "ed"
+    # add corpus examples under a special key
+    BASE["__corpus__"] = {"definition":"programmatic corpus", "type":"corpus", "examples": generate_corpus()}
 
-def make_adv_from_adj(w):
-    if w.endswith("y"):
-        return w[:-1] + "ily"
-    if w.endswith("ic"):
-        return w + "ally"
-    return w + "ly"
+    # generate morphological variants & compounds until we hit min_entries
+    words = list(BASE.keys())
+    i = 0
+    attempts = 0
+    while len(BASE) < min_entries and attempts < 20000:
+        base = words[i % len(words)]
+        attempts += 1
+        i += 1
+        btype = BASE[base]["type"]
+        if btype in ("noun","food","place"):
+            v = make_plural(base)
+            if v not in BASE:
+                BASE[v] = {"definition": f"plural of {base.replace('_',' ')}", "type":"noun", "examples": examples_for(v.replace("_"," "), "noun")}
+        if btype == "verb":
+            v_ing = make_ing(base)
+            v_past = make_past(base)
+            if v_ing not in BASE:
+                BASE[v_ing] = {"definition": f"present participle of {base}", "type":"verb", "examples": examples_for(v_ing, "verb")}
+            if v_past not in BASE:
+                BASE[v_past] = {"definition": f"past tense of {base}", "type":"verb", "examples": examples_for(v_past, "verb")}
+        if btype == "adj":
+            v_adv = make_adv_from_adj(base)
+            v_comp = base + "er"
+            v_sup = base + "est"
+            if v_adv not in BASE:
+                BASE[v_adv] = {"definition": f"adverb form of {base}", "type":"adv", "examples": examples_for(v_adv, "adv")}
+            if v_comp not in BASE:
+                BASE[v_comp] = {"definition": f"comparative of {base}", "type":"adj", "examples": examples_for(v_comp, "adj")}
+            if v_sup not in BASE:
+                BASE[v_sup] = {"definition": f"superlative of {base}", "type":"adj", "examples": examples_for(v_sup, "adj")}
+        # occasional compounds
+        if random.random() < 0.15:
+            other = random.choice(words)
+            comp = f"{base}_{other}"
+            if comp not in BASE and len(comp) < 40:
+                BASE[comp] = {"definition": f"compound term {base} {other}", "type":"noun", "examples": [f"the {comp.replace('_',' ')} is useful."]}
+        if i % 200 == 0:
+            words = list(BASE.keys())
 
-# populate BASE_DICT from seeds and variants
-all_stems = []
-for lst in seed_lists:
-    for w in lst:
-        w = w.lower().replace(" ", "_")
-        if w not in all_stems:
-            all_stems.append(w)
+    # ensure at least min_entries (fill synthetic if needed)
+    counter = 1
+    while len(BASE) < min_entries:
+        key = f"term_{counter}"
+        if key not in BASE:
+            BASE[key] = {"definition": f"synthetic filler term number {counter}", "type":"noun", "examples":[f"{key} example."]}
+        counter += 1
 
-# Add single-word place fixes (new york -> new_york)
-places_fix = {"newyork":"new_york", "united_kingdom":"united_kingdom"}
-all_stems = [places_fix.get(s,s) for s in all_stems]
+    return BASE
 
-# Add stems to BASE_DICT
-for stem in all_stems:
-    if stem not in BASE_DICT:
-        typ = "noun"
-        if stem in verbs: typ = "verb"
-        elif stem in adjectives: typ = "adj"
-        elif stem in adverbs: typ = "adv"
-        elif stem in foods: typ = "food"
-        elif stem in places: typ = "place"
-        elif stem in tech: typ = "tech"
-        BASE_DICT[stem] = {"definition": f"a {typ} named '{stem.replace('_',' ')}'.", "type": typ, "examples": examples_for(stem.replace("_"," "), typ)}
+# build the big base dict
+BASE_DICT = build_large_base_dict(min_entries=2000)
 
-# generate morphological variants until we have >= 2000 entries
-words = list(BASE_DICT.keys())
-i = 0
-attempts = 0
-while len(BASE_DICT) < 2000 and attempts < 10000:
-    base = words[i % len(words)]
-    attempts += 1
-    i += 1
-    # choose variant type based on base's type
-    btype = BASE_DICT[base]["type"]
-    if btype in ("noun","food","place"):
-        v = make_plural(base)
-        if v not in BASE_DICT:
-            BASE_DICT[v] = {"definition": f"plural of {base.replace('_',' ')}", "type":"noun", "examples": examples_for(v.replace("_"," "), "noun")}
-    if btype == "verb":
-        v_ing = make_ing(base)
-        v_past = make_past(base)
-        if v_ing not in BASE_DICT:
-            BASE_DICT[v_ing] = {"definition": f"present participle of {base}", "type":"verb", "examples": examples_for(v_ing, "verb")}
-        if v_past not in BASE_DICT:
-            BASE_DICT[v_past] = {"definition": f"past tense of {base}", "type":"verb", "examples": examples_for(v_past, "verb")}
-    if btype == "adj":
-        v_adv = make_adv_from_adj(base)
-        v_comp = base + "er"
-        v_sup = base + "est"
-        if v_adv not in BASE_DICT:
-            BASE_DICT[v_adv] = {"definition": f"adverb form of {base}", "type":"adv", "examples": examples_for(v_adv, "adv")}
-        if v_comp not in BASE_DICT:
-            BASE_DICT[v_comp] = {"definition": f"comparative of {base}", "type":"adj", "examples": examples_for(v_comp, "adj")}
-        if v_sup not in BASE_DICT:
-            BASE_DICT[v_sup] = {"definition": f"superlative of {base}", "type":"adj", "examples": examples_for(v_sup, "adj")}
-    # also create simple compound nouns by combining stems
-    if random.random() < 0.15:
-        other = random.choice(words)
-        comp = f"{base}_{other}"
-        if comp not in BASE_DICT and len(comp) < 30:
-            BASE_DICT[comp] = {"definition": f"compound term {base} {other}", "type":"noun", "examples": [f"the {comp.replace('_',' ')} is useful."]}
-    # refresh words list occasionally
-    if i % 100 == 0:
-        words = list(BASE_DICT.keys())
-
-# Safety: ensure at least 2000 entries by adding numeric variants if needed
-counter = 1
-while len(BASE_DICT) < 2000:
-    key = f"term_{counter}"
-    if key not in BASE_DICT:
-        BASE_DICT[key] = {"definition": f"synthetic filler term number {counter}", "type":"noun", "examples":[f"{key} example."]}
-    counter += 1
-
-print(f"BASE_DICT populated with {len(BASE_DICT)} entries (>=2000).")
-# -------------------------
-# End BASE_DICT generation
-# -------------------------
-
-
-# add programmatic 500-sentence corpus under a single key so Markov picks up examples
-BASE_DICT["__corpus__"] = {"definition":"500-sentence curated corpus to improve Markov grammar and transitions","type":"corpus","examples": generate_corpus()}
-
-# integrate optional external dictionary if present
+# allow loading an external dictionary.json to extend/overwrite
 if os.path.exists(DICT_FILE):
     ext = load_json(DICT_FILE, {})
     if isinstance(ext, dict):
@@ -343,21 +256,64 @@ def merged_dictionary() -> Dict[str, Dict[str,Any]]:
     return d
 
 # -------------------------
-# Expanded KB (fact Q->A)
+# Expanded KB (facts): programmatic + manual
 # -------------------------
 KB = {
-    "who was the first president of the united states": "George Washington (1789–1797).",
-    "who was the 16th president of the united states": "Abraham Lincoln (1861–1865).",
-    "when was the declaration of independence signed": "The U.S. Declaration of Independence was adopted on July 4, 1776.",
+    # capitals & geography
     "capital of france": "Paris.",
     "capital of germany": "Berlin.",
-    "what is gravity": "Gravity is the force by which objects with mass attract each other (≈9.81 m/s² near Earth's surface).",
-    "what is pi": "Pi (π) ≈ 3.141592653589793 — the ratio of a circle's circumference to its diameter.",
-    "what is python": "Python is a high-level programming language known for readability and wide use in scripting and data science.",
+    "capital of spain": "Madrid.",
+    "capital of italy": "Rome.",
+    "capital of the united kingdom": "London.",
+    "capital of the united states": "Washington, D.C.",
+    "capital of canada": "Ottawa.",
+    "capital of australia": "Canberra.",
+    "capital of russia": "Moscow.",
+    "capital of china": "Beijing.",
+    "capital of japan": "Tokyo.",
+    "capital of india": "New Delhi.",
+    # history & people
+    "who was the first president of the united states": "George Washington (1789–1797).",
+    "who was abraham lincoln": "Abraham Lincoln, 16th U.S. President (1861–1865).",
+    "who discovered penicillin": "Alexander Fleming (1928).",
     "who wrote hamlet": "William Shakespeare.",
-    "what is the boiling point of water": "100 °C (212 °F) at standard atmospheric pressure.",
-    # (you can expand this further by editing the KB dictionary)
+    "who painted the mona lisa": "Leonardo da Vinci.",
+    # science basics
+    "what is gravity": "Gravity is the force of attraction between masses; near Earth's surface ≈ 9.81 m/s².",
+    "what is photosynthesis": "A process in plants turning light, CO₂ and water into glucose and oxygen.",
+    "what is dna": "DNA stores genetic instructions for living organisms.",
+    "what is pi": "π ≈ 3.141592653589793 — ratio of circumference to diameter.",
+    "what is the speed of light": "≈ 299,792,458 m/s in vacuum.",
+    # units & conversions
+    "how many centimeters in a meter": "100 centimeters in 1 meter.",
+    "how many meters in a kilometer": "1000 meters in 1 kilometer.",
+    "how many inches in a foot": "12 inches in a foot.",
+    "how many ounces in a pound": "16 ounces in 1 pound (avoirdupois).",
+    "convert celsius to fahrenheit": "°F = °C × 9/5 + 32.",
+    # everyday how-to & food
+    "how do i boil an egg": "Place eggs in boiling water 6–12 minutes depending on firmness; cool in cold water.",
+    "how to cook rice": "Rinse rice; use ~1.5–2 parts water to 1 part rice; simmer until tender.",
+    "what is pasta": "Pasta is a type of noodle made from wheat, common in Italian cuisine.",
+    "what is sushi": "Sushi is a Japanese dish featuring vinegared rice combined with fish, vegetables, or egg.",
+    # misc
+    "who is albert einstein": "A theoretical physicist known for the theory of relativity.",
+    "what is python": "Python is a high-level programming language used for scripting and data science.",
+    "what is an api": "An API (Application Programming Interface) allows software components to exchange data.",
+    "what is machine learning": "A field where models learn patterns from data to make predictions."
 }
+
+# programmatic additions: food Qs and verb Qs
+foods = [k for k,v in BASE_DICT.items() if v.get("type") in ("food","noun") and len(k)>1 and not k.startswith("term_")]
+for food in random.sample(foods, min(120, len(foods))):
+    q = f"what is {food}"
+    if q not in KB:
+        KB[q] = f"{food.replace('_',' ').capitalize()} is a common food item."
+
+verbs_sample = ["eat","drink","cook","bake","boil","fry","chop","slice","mix","stir","serve","taste"]
+for v in verbs_sample:
+    q = f"what does {v} mean"
+    if q not in KB:
+        KB[q] = f"'{v}' is a verb meaning to {v} (an action)."
 
 # -------------------------
 # Vocab caching & vectorization
@@ -395,7 +351,7 @@ def text_to_vector(text: str, vocab_list: List[str]) -> List[float]:
     return [x/norm for x in vec]
 
 # -------------------------
-# TinyNN classifier (small & fast)
+# TinyNN classifier
 # -------------------------
 def random_matrix(rows, cols, scale=0.1):
     return [[(random.random()*2-1)*scale for _ in range(cols)] for _ in range(rows)]
@@ -464,7 +420,7 @@ class TinyNN:
                     self.b1[j] -= lr * err_hidden[j]
 
 # -------------------------
-# Intents & seeds
+# Intents & seed examples
 # -------------------------
 INTENTS = ["define","fact","math","time","date","teach","chat"]
 SEED_EXAMPLES = [
@@ -493,7 +449,7 @@ def build_training(vocab: List[str]) -> List[Tuple[List[float], int]]:
     return data
 
 # -------------------------
-# Markov: punctuation, grammar-aware, seed/topic/backoff, paragraph generator
+# Markov (improved): grammar-aware, seed/topic/backoff, paragraph generator
 # -------------------------
 class Markov:
     def __init__(self):
@@ -722,7 +678,6 @@ class Markov:
         paragraph = re.sub(r"\s{2,}", " ", paragraph).strip()
         return paragraph
 
-# instantiate markov
 MARKOV = Markov()
 
 def markov_serialize(m):
@@ -753,7 +708,7 @@ def train_markov_full():
     except Exception:
         pass
 
-# load persisted markov if available
+# try to load persisted markov
 try:
     mser = load_json(MARKOV_FILE, None)
     if mser and isinstance(mser, dict) and "map" in mser:
@@ -765,7 +720,7 @@ except Exception:
     train_markov_full()
 
 # -------------------------
-# Retrieval/helpers
+# Retrieval & helper functions
 # -------------------------
 LEARN_PATTERNS = [
     re.compile(r'^\s*define\s+([^\:]+)\s*[:\-]\s*(.+)$', re.I),
@@ -819,7 +774,7 @@ def lookup_kb(query: str) -> Tuple[Optional[str], float]:
     return None, 0.0
 
 # -------------------------
-# Build & train TinyNN (on-demand)
+# Build & train TinyNN (on demand)
 # -------------------------
 VOCAB: List[str] = []
 NN_MODEL: Optional[TinyNN] = None
@@ -896,7 +851,7 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
     if re.search(r"\bwhat(?:'s| is)? the date\b|\bcurrent date\b|\bdate today\b", lower):
         return {"reply": f"Today's date is {datetime.now().strftime('%Y-%m-%d')}", "meta":{"intent":"date"}}
 
-    # explicit define command
+    # explicit define
     if lower.startswith("/define ") or lower.startswith("define "):
         rest = user.split(None,1)[1] if len(user.split(None,1))>1 else ""
         m = re.match(r'\s*([^\:]+)\s*[:\-]\s*(.+)', rest)
@@ -958,7 +913,7 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
         if math_res is not None:
             return {"reply": f"Math result: {math_res}", "meta":{"intent":"math"}}
 
-    # retrieval from memories or learned
+    # memory retrieval
     mem = retrieve_from_memory_or_learned(user)
     if mem:
         return {"reply": mem, "meta":{"intent":"memory"}}
@@ -972,7 +927,7 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
         if para:
             return {"reply": para, "meta":{"intent":"gen_paragraph"}}
 
-    # Markov generative fallback
+    # Markov fallback (single)
     prev_ends_sentence = bool(re.search(r"[\.!\?]\s*$", user))
     gen = MARKOV.generate(seed=user, max_words=50, capitalize_if=prev_ends_sentence, topic=topic)
     if gen:
@@ -1015,17 +970,17 @@ def ingest_text_content(name: str, text: str, save_as_memory: bool=True):
 # -------------------------
 # Streamlit UI
 # -------------------------
-st.set_page_config(page_title="Jack — Offline AI (Full)", layout="wide")
-st.title("Jack — Offline AI (Full)")
+st.set_page_config(page_title="Jack — Offline AI (Big Dict)", layout="wide")
+st.title("Jack — Offline AI (Big Dictionary & KB)")
 
 left, right = st.columns([3,1])
 
 with right:
     st.header("Memory & Model Controls")
     if st.button("Clear Conversation"):
-        ai_state["conversations"].clear(); save_json(STATE_FILE, ai_state); st.success("Conversation cleared."); st.rerun()
+        ai_state["conversations"].clear(); save_json(STATE_FILE, ai_state); st.success("Conversation cleared."); st.experimental_rerun()
     if st.button("Forget Learned Memories"):
-        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.success("All learned memories forgotten."); st.rerun()
+        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.success("All learned memories forgotten."); st.experimental_rerun()
 
     st.markdown("---")
     st.write("Model status:")
@@ -1039,7 +994,7 @@ with right:
             build_and_train_model(force=True)
             train_markov_full()
             st.success("Model rebuilt.")
-            st.rerun()
+            st.experimental_rerun()
 
     st.markdown("---")
     st.markdown("**Manage Learned**")
@@ -1051,7 +1006,7 @@ with right:
                 st.write(f"• **{k}** — {ai_state['learned'][k].get('definition','')[:180]}")
             with colk2:
                 if st.button(f"Delete {k}", key=f"del_{k}"):
-                    ai_state["learned"].pop(k, None); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.rerun()
+                    ai_state["learned"].pop(k, None); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.experimental_rerun()
     else:
         st.write("_No learned items yet._")
 
@@ -1075,7 +1030,7 @@ with right:
             if st.button("Ingest file"):
                 msg = ingest_text_content(uploaded.name, text, save_as_memory=save_as_memory)
                 st.success(msg)
-                st.rerun()
+                st.experimental_rerun()
         except Exception as e:
             st.error(f"Failed to read uploaded file: {e}")
 
@@ -1095,7 +1050,7 @@ with right:
                 save_json(STATE_FILE, ai_state)
                 ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
                 st.success("Merged imported state. Model marked dirty.")
-                st.rerun()
+                st.experimental_rerun()
             else:
                 st.error("Imported file not in expected format.")
         except Exception as e:
@@ -1128,7 +1083,7 @@ with left:
             save_json(STATE_FILE, ai_state)
             MARKOV.train(ui); MARKOV.train(reply)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            st.rerun()
+            st.experimental_rerun()
 
     if c2.button("Complete (single)"):
         ui = user_input.rstrip()
@@ -1145,7 +1100,7 @@ with left:
                 MARKOV.train(ui); MARKOV.train(final)
                 save_json(STATE_FILE, ai_state)
                 ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            st.rerun()
+            st.experimental_rerun()
 
     if c3.button("Generate Paragraph"):
         ui = user_input.strip()
@@ -1160,7 +1115,7 @@ with left:
             MARKOV.train(para)
             save_json(STATE_FILE, ai_state)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            st.rerun()
+            st.experimental_rerun()
 
     if c4.button("Teach (word: definition)"):
         ui = user_input.strip()
@@ -1172,7 +1127,7 @@ with left:
             MARKOV.train(f"{w} {d}")
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
             st.success(f"Learned '{w}'. (Model rebuild recommended.)")
-            st.rerun()
+            st.experimental_rerun()
         else:
             st.warning("To teach: enter `word: definition` (e.g. gravity: a force that pulls)")
 
