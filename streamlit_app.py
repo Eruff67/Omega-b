@@ -1,8 +1,9 @@
-# jack_offline_saved_memory_with_corpus.py
-# Jack — Offline AI with persistent memory, large KB, grammar-aware Markov, and a 500-sentence corpus
+# jack_offline_full.py
+# Jack — Offline AI with persistent memory, expanded KB, grammar-aware Markov,
+# 500-sentence corpus, topic-aware paragraph generation, and Streamlit UI
 # Run:
 #   pip install streamlit
-#   streamlit run jack_offline_saved_memory_with_corpus.py
+#   streamlit run jack_offline_full.py
 
 import streamlit as st
 import json
@@ -36,11 +37,10 @@ def save_json(path: str, data):
     except Exception as e:
         print("Failed saving", path, e)
 
-# load or init state
 ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings": {}, "model_meta": {}, "model_dirty": False})
 
 # -------------------------
-# Tokenization: include punctuation tokens as separate tokens
+# Tokenization (keeps punctuation tokens separate)
 # -------------------------
 WORD_RE = re.compile(r"[A-Za-z']+|[.,!?:;]")
 
@@ -48,55 +48,42 @@ def tokenize(text: str) -> List[str]:
     return WORD_RE.findall((text or "").lower())
 
 # -------------------------
-# Generate a 500-sentence curated corpus (programmatic, varied)
+# Build a curated 500-sentence corpus programmatically
 # -------------------------
 def generate_corpus() -> List[str]:
     nouns = ["cat","dog","child","city","teacher","student","computer","book","car","river","mountain","friend","idea","moment","problem","day","night","house","garden","sky"]
     verbs = ["saw","likes","loves","found","reads","writes","drives","walks","jumps","learns","teaches","knows","understands","creates","builds","says","thinks","wonders","watches","helps"]
     adjectives = ["quick","slow","bright","dark","happy","sad","quiet","loud","old","young","strong","weak","big","small","warm","cold","sharp","soft","clear","noisy"]
-    adverbs = ["quickly","slowly","carefully","easily","often","always","sometimes","rarely","never","happily","sadly","quietly","loudly","brightly","calmly","angrily"]
+    adverbs = ["quickly","slowly","carefully","easily","often","always","sometimes","rarely","never","happily","sadly","quietly","loudly","brightly","calmly"]
     preps = ["in","on","at","with","for","about","under","over","between","near","behind","across","through"]
     starters = ["in the morning","at night","yesterday","today","tomorrow","last week","this week","every day","sometimes","usually"]
-    puncts = [".", ".", ".", "!", "?", ";", ":" ]  # make period more likely
+    puncts = [".", ".", ".", "!", "?", ";", ":" ]  # period more likely
 
     corpus = []
     i = 1
-    # mix of statement, question, exclamation, clause sentences
     while len(corpus) < 500:
         t = i % 10
         if t == 1:
-            # simple declarative: "the ADJ NOUN VERB the NOUN."
             s = f"the {random.choice(adjectives)} {random.choice(nouns)} {random.choice(verbs)} the {random.choice(nouns)}{random.choice(puncts)}"
         elif t == 2:
-            # temporal clause + statement
             s = f"{random.choice(starters)}, the {random.choice(nouns)} {random.choice(verbs)} {random.choice(adverbs)}{random.choice(puncts)}"
         elif t == 3:
-            # question: "do you VERB the NOUN?"
             s = f"do you {random.choice(verbs)} the {random.choice(nouns)}?"
         elif t == 4:
-            # exclamation
             s = f"what a {random.choice(adjectives)} {random.choice(nouns)}!"
         elif t == 5:
-            # prepositional phrase + verb
             s = f"{random.choice(preps).capitalize()} the {random.choice(nouns)}, she {random.choice(verbs)}{random.choice(puncts)}"
         elif t == 6:
-            # compound: "The NOUN is ADJ, and the NOUN is ADJ."
             s = f"the {random.choice(nouns)} is {random.choice(adjectives)}, and the {random.choice(nouns)} is {random.choice(adjectives)}{random.choice(puncts)}"
         elif t == 7:
-            # imperative: "Please VERB the NOUN."
             s = f"please {random.choice(verbs)} the {random.choice(nouns)}{random.choice(puncts)}"
         elif t == 8:
-            # comparative phrase
             s = f"the {random.choice(nouns)} is more {random.choice(adjectives)} than the {random.choice(nouns)}{random.choice(puncts)}"
         elif t == 9:
-            # colon / list style
             s = f"remember: {random.choice(nouns)}, {random.choice(nouns)}, and {random.choice(nouns)}."
         else:
-            # balanced sentence with adverb
             s = f"the {random.choice(nouns)} {random.choice(verbs)} {random.choice(adverbs)}{random.choice(puncts)}"
-        # small cleanups: ensure single spaces, lowercase, strip
         s = re.sub(r"\s+", " ", s).strip().lower()
-        # ensure punctuation present at end (most templates include)
         if not re.search(r"[.!?;:]$", s):
             s = s + "."
         corpus.append(s)
@@ -104,7 +91,7 @@ def generate_corpus() -> List[str]:
     return corpus
 
 # -------------------------
-# Expanded embedded dictionary (examples & types help grammar)
+# Base dictionary (expanded) + add corpus as examples under __corpus__
 # -------------------------
 BASE_DICT = {
     "i": {"definition":"First-person pronoun.","type":"pronoun","examples":["i went home.","i think that's correct."]},
@@ -177,122 +164,10 @@ BASE_DICT = {
     "person": {"definition":"A human being.","type":"noun","examples":["she is a kind person.","every person matters."]},
 }
 
-# add generated corpus as a single entry so examples are picked up by Markov
-BASE_DICT["__corpus__"] = {"definition": "500-sentence curated corpus to improve Markov grammar and transitions", "type": "corpus", "examples": generate_corpus()}
+# add programmatic 500-sentence corpus under a single key so Markov picks up examples
+BASE_DICT["__corpus__"] = {"definition":"500-sentence curated corpus to improve Markov grammar and transitions","type":"corpus","examples": generate_corpus()}
 
-# --- bulk vocabulary expansion (food, verbs, pronouns, nouns, adjectives, adverbs, auxiliaries) ---
-extra_words = {
-    # Food / drink (nouns)
-    "apple": {"definition":"A sweet, edible fruit.","type":"noun","examples":["i ate an apple.","an apple a day."]},
-    "banana": {"definition":"A long yellow fruit.","type":"noun","examples":["peel a banana.","banana smoothies are tasty."]},
-    "bread": {"definition":"Baked food made from flour and water.","type":"noun","examples":["slice the bread.","toast the bread."]},
-    "rice": {"definition":"Small white grains used as a staple food.","type":"noun","examples":["cook the rice.","fried rice tastes good."]},
-    "pasta": {"definition":"Italian noodles made from wheat.","type":"noun","examples":["boil the pasta.","pasta with sauce."]},
-    "cheese": {"definition":"Dairy product made from milk.","type":"noun","examples":["grate the cheese.","cheese on pizza."]},
-    "chicken": {"definition":"Poultry meat used in many dishes.","type":"noun","examples":["roast the chicken.","chicken soup is warm."]},
-    "beef": {"definition":"Meat from cattle.","type":"noun","examples":["grill the beef.","beef stew is hearty."]},
-    "fish": {"definition":"Aquatic animal used for food.","type":"noun","examples":["bake the fish.","fresh fish is best."]},
-    "egg": {"definition":"An edible egg from birds, often chicken.","type":"noun","examples":["boil an egg.","eggs for breakfast."]},
-    "milk": {"definition":"White liquid produced by mammals, used as a drink.","type":"noun","examples":["pour the milk.","milk in coffee."]},
-    "coffee": {"definition":"A brewed drink from roasted coffee beans.","type":"noun","examples":["i drink coffee.","black coffee or with milk."]},
-    "tea": {"definition":"A drink made by infusing leaves in hot water.","type":"noun","examples":["a cup of tea.","green tea is common."]},
-    "soup": {"definition":"Liquid dish typically served warm.","type":"noun","examples":["eat the soup.","chicken soup helps."]},
-    "salad": {"definition":"A mixture of raw vegetables or fruits.","type":"noun","examples":["i made a salad.","salad with dressing."]},
-
-    # Action verbs (common)
-    "eat": {"definition":"Put food into the mouth and swallow.","type":"verb","examples":["i eat lunch.","eat slowly."]},
-    "drink": {"definition":"Take liquid into the mouth and swallow.","type":"verb","examples":["drink water.","drink some juice."]},
-    "cook": {"definition":"Prepare food by heating.","type":"verb","examples":["cook dinner.","learn to cook."]},
-    "bake": {"definition":"Cook food by dry heat in an oven.","type":"verb","examples":["bake a cake.","bake bread."]},
-    "fry": {"definition":"Cook in hot fat or oil.","type":"verb","examples":["fry the onions.","fry eggs."]},
-    "boil": {"definition":"Heat a liquid until it bubbles.","type":"verb","examples":["boil water.","boil the pasta."]},
-    "chop": {"definition":"Cut into small pieces.","type":"verb","examples":["chop the onion.","chop vegetables."]},
-    "slice": {"definition":"Cut into thin pieces.","type":"verb","examples":["slice bread.","slice the tomato."]},
-    "mix": {"definition":"Combine ingredients together.","type":"verb","examples":["mix the batter.","mix well."]},
-    "stir": {"definition":"Move a spoon around in a liquid.","type":"verb","examples":["stir the soup.","stir gently."]},
-    "serve": {"definition":"Present food for eating.","type":"verb","examples":["serve the meal.","serve warm."]},
-    "taste": {"definition":"Sample food to evaluate flavor.","type":"verb","examples":["taste the sauce.","taste before seasoning."]},
-
-    # Movement / general action verbs
-    "walk": {"definition":"Move at a regular pace by lifting and setting down each foot.","type":"verb","examples":["walk to school.","we walk together."]},
-    "run": {"definition":"Move rapidly on foot.","type":"verb","examples":["run fast.","he runs every morning."]},
-    "jump": {"definition":"Push oneself off a surface into the air.","type":"verb","examples":["jump high.","the child jumped."]},
-    "sit": {"definition":"Adopt a seated position.","type":"verb","examples":["please sit down.","sit on the chair."]},
-    "stand": {"definition":"Adopt an upright position on the feet.","type":"verb","examples":["stand up.","she stood still."]},
-    "drive": {"definition":"Operate and control a vehicle.","type":"verb","examples":["drive carefully.","he drives to work."]},
-    "sleep": {"definition":"A natural periodic state of rest.","type":"verb","examples":["sleep early.","i sleep eight hours."]},
-
-    # Pronouns & determiners
-    "he": {"definition":"Third-person singular male pronoun.","type":"pronoun","examples":["he is here.","he likes coffee."]},
-    "she": {"definition":"Third-person singular female pronoun.","type":"pronoun","examples":["she smiled.","she cooks well."]},
-    "they": {"definition":"Third-person plural pronoun.","type":"pronoun","examples":["they are ready.","they have ideas."]},
-    "them": {"definition":"Objective form of they.","type":"pronoun","examples":["give it to them.","i told them."]},
-    "his": {"definition":"Belonging to him.","type":"pronoun","examples":["his book.","that is his."]},
-    "her": {"definition":"Belonging to her or objective pronoun.","type":"pronoun","examples":["her phone.","i called her."]},
-    "their": {"definition":"Belonging to them.","type":"pronoun","examples":["their home.","their opinion matters."]},
-    "my": {"definition":"Belonging to me.","type":"pronoun","examples":["my idea.","my bag."]},
-    "your": {"definition":"Belonging to you.","type":"pronoun","examples":["your turn.","your coat."]},
-    "our": {"definition":"Belonging to us.","type":"pronoun","examples":["our project.","our house."]},
-
-    # Common nouns
-    "table": {"definition":"A piece of furniture with a flat top and legs.","type":"noun","examples":["place the book on the table.","the table is round."]},
-    "chair": {"definition":"A separate seat for one person.","type":"noun","examples":["sit on the chair.","a broken chair."]},
-    "window": {"definition":"An opening in a wall for light and air.","type":"noun","examples":["open the window.","a window view."]},
-    "door": {"definition":"A movable barrier that allows entry.","type":"noun","examples":["close the door.","the door was locked."]},
-    "phone": {"definition":"A device for voice and data communication.","type":"noun","examples":["answer the phone.","her phone rang."]},
-    "computer": {"definition":"An electronic device that processes data.","type":"noun","examples":["use the computer.","the computer is slow."]},
-    "book": {"definition":"A set of pages bound together containing text or images.","type":"noun","examples":["read a book.","the book is new."]},
-    "city": {"definition":"A large and densely populated urban area.","type":"noun","examples":["the city is busy.","visit the city."]},
-    "school": {"definition":"An institution for education.","type":"noun","examples":["go to school.","the school is closed."]},
-    "market": {"definition":"A place where goods are bought and sold.","type":"noun","examples":["visit the market.","the market is crowded."]},
-
-    # Adjectives (descriptive)
-    "delicious": {"definition":"Highly pleasant to taste.","type":"adj","examples":["the soup is delicious.","a delicious meal."]},
-    "spicy": {"definition":"Having strong seasoning.","type":"adj","examples":["the curry is spicy.","spicy food is hot."]},
-    "fresh": {"definition":"Recently made or obtained; not stale.","type":"adj","examples":["fresh bread.","fresh vegetables."]},
-    "hot": {"definition":"Having a high temperature.","type":"adj","examples":["the coffee is hot.","hot weather."]},
-    "cold": {"definition":"At a low temperature.","type":"adj","examples":["cold water.","the room is cold."]},
-    "sweet": {"definition":"Having a sugary taste.","type":"adj","examples":["sweet dessert.","sweet and sour."]},
-    "bitter": {"definition":"Having a sharp taste.","type":"adj","examples":["bitter coffee.","bitter medicine."]},
-    "salty": {"definition":"Tasting of salt.","type":"adj","examples":["salty chips.","a salty soup."]},
-    "juicy": {"definition":"Full of juice and flavor.","type":"adj","examples":["a juicy steak.","juicy fruit."]},
-    "crispy": {"definition":"Pleasantly firm and makes a sound when bitten.","type":"adj","examples":["crispy fries.","crispy skin."]},
-
-    # Adverbs
-    "slowly": {"definition":"At a low speed.","type":"adv","examples":["walk slowly.","open slowly."]},
-    "quickly": {"definition":"At a fast speed.","type":"adv","examples":["finish quickly.","run quickly."]},
-    "carefully": {"definition":"With care.","type":"adv","examples":["drive carefully.","read carefully."]},
-    "happily": {"definition":"In a happy manner.","type":"adv","examples":["smile happily.","they lived happily."]},
-    "easily": {"definition":"Without difficulty.","type":"adv","examples":["solve easily.","easily done."]},
-    "quietly": {"definition":"In a quiet manner.","type":"adv","examples":["speak quietly.","sit quietly."]},
-
-    # Modals / auxiliaries / infinitive helpers
-    "to": {"definition":"Used to form infinitives.","type":"preverb","examples":["to eat, to sleep, to read."]},
-    "will": {"definition":"Modal indicating future tense.","type":"modal","examples":["i will go.","it will rain."]},
-    "would": {"definition":"Modal used for conditional or polite requests.","type":"modal","examples":["would you like some?","i would help."]},
-    "should": {"definition":"Modal indicating advice or expectation.","type":"modal","examples":["you should rest.","we should try."]},
-    "can": {"definition":"Modal indicating ability or permission.","type":"modal","examples":["can you help?","we can try."]},
-    "could": {"definition":"Modal used as past ability or polite request.","type":"modal","examples":["could you pass that?","i could go."]},
-
-    # Conjunctions / prepositions (more)
-    "before": {"definition":"Earlier than.","type":"prep","examples":["finish before noon.","before you leave."]},
-    "after": {"definition":"Later than.","type":"prep","examples":["after dinner.","after the show."]},
-    "because": {"definition":"For the reason that.","type":"conj","examples":["i stayed because it rained.","because it's late."]},
-    "although": {"definition":"Despite the fact that.","type":"conj","examples":["although it's cold, we went.","although tired, she smiled."]},
-
-    # Short function words & punctuation-friendly tokens
-    "yes": {"definition":"Affirmative response.","type":"word","examples":["yes, please.","yes I agree."]},
-    "no": {"definition":"Negative response.","type":"word","examples":["no thanks.","no, I disagree."]},
-    "okay": {"definition":"Expression of agreement or acceptance.","type":"word","examples":["okay, let's go.","okay then."]},
-}
-
-# integrate these into BASE_DICT (do not overwrite existing keys)
-for k,v in extra_words.items():
-    if k not in BASE_DICT:
-        BASE_DICT[k] = v
-
-
-# merge external dictionary file if present at startup
+# integrate optional external dictionary if present
 if os.path.exists(DICT_FILE):
     ext = load_json(DICT_FILE, {})
     if isinstance(ext, dict):
@@ -306,72 +181,20 @@ def merged_dictionary() -> Dict[str, Dict[str,Any]]:
     return d
 
 # -------------------------
-# Large KB (many Q->A pairs)
+# Expanded KB (fact Q->A)
 # -------------------------
 KB = {
     "who was the first president of the united states": "George Washington (1789–1797).",
-    "who was the first us president": "George Washington (1789–1797).",
     "who was the 16th president of the united states": "Abraham Lincoln (1861–1865).",
     "when was the declaration of independence signed": "The U.S. Declaration of Independence was adopted on July 4, 1776.",
-    "when did world war i start": "World War I began in 1914.",
-    "when did world war i end": "World War I ended in 1918.",
-    "when did world war ii start": "World War II began in 1939.",
-    "when did world war ii end": "World War II ended in 1945.",
-    "who discovered america": "Christopher Columbus's 1492 voyage reached the Americas for Europe; indigenous peoples lived there long before.",
-    "who discovered penicillin": "Alexander Fleming is credited with discovering penicillin in 1928.",
     "capital of france": "Paris.",
     "capital of germany": "Berlin.",
-    "capital of spain": "Madrid.",
-    "capital of italy": "Rome.",
-    "capital of united kingdom": "London.",
-    "capital of the united states": "Washington, D.C.",
-    "capital of canada": "Ottawa.",
-    "capital of australia": "Canberra.",
-    "capital of russia": "Moscow.",
-    "capital of china": "Beijing.",
-    "capital of japan": "Tokyo.",
-    "capital of india": "New Delhi.",
     "what is gravity": "Gravity is the force by which objects with mass attract each other (≈9.81 m/s² near Earth's surface).",
-    "what is photosynthesis": "A process by which plants convert light energy into chemical energy, producing oxygen and glucose from CO₂ and water.",
-    "what is the largest planet": "Jupiter.",
-    "what is the smallest planet": "Mercury (excluding dwarf planets).",
-    "what is the sun": "The Sun is a star at the center of the Solar System that supplies light and heat to Earth.",
-    "how far is the earth from the sun": "About 1 astronomical unit ≈ 149.6 million kilometers (≈93 million miles).",
-    "what is dna": "DNA (deoxyribonucleic acid) stores genetic information in living organisms.",
-    "what is rna": "RNA (ribonucleic acid) is involved in coding, decoding, regulation, and expression of genes.",
     "what is pi": "Pi (π) ≈ 3.141592653589793 — the ratio of a circle's circumference to its diameter.",
-    "what is e": "Euler's number e ≈ 2.718281828 — the base of natural logarithms.",
-    "what is the speed of light": "Approximately 299,792,458 meters per second in vacuum.",
-    "what is avogadros number": "Avogadro's number ≈ 6.02214076 × 10^23 (particles per mole).",
-    "what is 2 plus 2": "2 + 2 = 4.",
-    "how many centimeters in a meter": "100 centimeters in 1 meter.",
-    "how many meters in a kilometer": "1000 meters in 1 kilometer.",
-    "how many inches in a foot": "12 inches in 1 foot.",
-    "how many ounces in a pound": "16 ounces in 1 pound (avoirdupois).",
-    "convert celsius to fahrenheit": "°F = °C × 9/5 + 32.",
-    "what is a fever": "A fever is a raised body temperature, often a sign of infection. Adults: temps above ~38°C (100.4°F).",
-    "what is dehydration": "A condition when the body loses more fluids than it takes in; symptoms include thirst and dizziness.",
     "what is python": "Python is a high-level programming language known for readability and wide use in scripting and data science.",
-    "what is an api": "An API (Application Programming Interface) allows software systems to communicate and exchange data.",
-    "what is machine learning": "A field of AI where models learn patterns from data to make predictions or decisions.",
     "who wrote hamlet": "William Shakespeare.",
-    "who painted the mona lisa": "Leonardo da Vinci.",
-    "what is the highest mountain": "Mount Everest is the highest mountain above sea level (≈8,848 m).",
-    "what is the longest river": "The Nile and Amazon are both contenders depending on measurement method; commonly the Nile is cited as the longest.",
-    "what currency does the united states use": "United States dollar (USD).",
-    "what language is spoken in brazil": "Portuguese is the official language of Brazil.",
-    "how do i boil an egg": "Place eggs in boiling water and cook 6–8 minutes for medium, 9–12 minutes for hard; cool in cold water to stop cooking.",
-    "definition of computer": "An electronic device that processes data according to programmed instructions.",
-    "definition of algorithm": "A step-by-step procedure for solving a problem or performing a task.",
-    "what is the boiling point of water": "100 °C (212 °F) at standard atmospheric pressure (sea level).",
-    "what is the freezing point of water": "0 °C (32 °F) at standard atmospheric pressure.",
-    "how many seconds in a minute": "60 seconds.",
-    "how many minutes in an hour": "60 minutes.",
-    "how many hours in a day": "24 hours.",
-    "how many days in a year": "365 days (366 in a leap year).",
-    "who is elon musk": "Entrepreneur (SpaceX, Tesla, and more).",
-    "who is barack obama": "44th President of the United States (2009–2017).",
-    "who is albert einstein": "Physicist known for the theory of relativity.",
+    "what is the boiling point of water": "100 °C (212 °F) at standard atmospheric pressure.",
+    # (you can expand this further by editing the KB dictionary)
 }
 
 # -------------------------
@@ -507,16 +330,17 @@ def build_training(vocab: List[str]) -> List[Tuple[List[float], int]]:
         data.append((text_to_vector(phrase, vocab), INTENTS.index("teach")))
     return data
 
-# ---------- Replace current Markov class with this improved, seed-aware version ----------
+# -------------------------
+# Markov: punctuation, grammar-aware, seed/topic/backoff, paragraph generator
+# -------------------------
 class Markov:
     def __init__(self):
         self.map = {}
         self.starts = []
 
-    def train(self, text):
+    def train(self, text: str):
         toks = tokenize(text)
-        if len(toks) < 3:
-            return
+        if len(toks) < 3: return
         self.starts.append((toks[0].lower(), toks[1].lower()))
         for i in range(len(toks)-2):
             key = (toks[i].lower(), toks[i+1].lower())
@@ -562,7 +386,7 @@ class Markov:
             return "article"
         if tok_l in ("and","or","but"):
             return "conj"
-        if tok_l in ("in","on","at","with","for","to","from","by","about"):
+        if tok_l in ("in","on","at","with","for","to","from","by","about","before","after"):
             return "prep"
         if tok_l in ("is","are","was","were","be","am","been","being","have","has","had","do","does","did","will","can","may","should","would","could"):
             return "verb"
@@ -575,7 +399,6 @@ class Markov:
         return ""
 
     def _pos_score(self, prev_tok, prev_prev_tok, candidate):
-        # same lightweight POS bonuses as before
         cand_type = self._token_type(candidate)
         prev_type = self._token_type(prev_tok) if prev_tok else ""
         prevprev_type = self._token_type(prev_prev_tok) if prev_prev_tok else ""
@@ -605,58 +428,43 @@ class Markov:
             bonus += 0.1
         return bonus
 
-    def _rank_candidates(self, key, seed_tokens=None):
-        """
-        Rank next-word candidates for a given bigram key.
-        If seed_tokens provided, give extra score to candidates that overlap with seed.
-        """
+    def _rank_candidates(self, key, seed_tokens=None, topic_tokens=None):
         choices = self.map.get(key, {})
-        if not choices:
-            return []
+        if not choices: return []
         allowed = self._valid_tokens_set()
         scored = []
         for w,count in choices.items():
-            if not self._is_real_word(w, allowed):
-                continue
-            prev_tok = key[1]
-            prev_prev_tok = key[0]
+            if not self._is_real_word(w, allowed): continue
+            prev_tok = key[1]; prev_prev_tok = key[0]
             bonus = self._pos_score(prev_tok, prev_prev_tok, w)
-            # seed-match bonus: prefer candidate tokens that appear in the user's seed
             if seed_tokens and w in seed_tokens:
                 bonus += 3.0
+            if topic_tokens and w in topic_tokens:
+                bonus += 2.0
             score = count + bonus
             scored.append((w, score))
         if not scored:
-            # fallback to raw counts if everything filtered
             for w,count in choices.items():
                 scored.append((w, float(count)))
         scored.sort(key=lambda kv: kv[1], reverse=True)
         return scored
 
-    def _find_best_backoff_key(self, seed_tokens):
-        """
-        If seed bigram isn't present, search the map for the best key by token overlap:
-        For each candidate key, score = overlap(seed_tokens, {key0,key1} U top_followers).
-        Return the key with highest score (ties resolved by random choice among top scorers).
-        This biases the backoff to keys that are topically related to the seed.
-        """
+    def _find_best_backoff_key(self, seed_tokens:set, topic_tokens:set):
         if not self.map:
             return None
         best_score = -1
         best_keys = []
         seed_set = set(seed_tokens or [])
-        # Precompute top followers for each key to make scoring faster (limit to top 5)
+        topic_set = set(topic_tokens or [])
         for key, nxts in self.map.items():
             key_tokens = {key[0], key[1]}
-            # pick top 5 follower tokens by count
             top_followers = sorted(nxts.items(), key=lambda kv: kv[1], reverse=True)[:5]
             follower_tokens = {w for w,_ in top_followers}
             pool = key_tokens | follower_tokens
-            score = len(seed_set & pool)
-            # small tie-breaker using sum of counts (prefer denser bigrams)
+            score_seed = len(seed_set & pool)
+            score_topic = len(topic_set & pool)
             total_count = sum(nxts.values())
-            # combined score: overlap * 10 + log(total_count+1)
-            combined = score * 10 + math.log(total_count + 1)
+            combined = score_seed * 12 + score_topic * 8 + math.log(total_count + 1)
             if combined > best_score:
                 best_score = combined
                 best_keys = [key]
@@ -667,8 +475,7 @@ class Markov:
         return random.choice(best_keys)
 
     def _finalize_sentence(self, words, capitalize_if=True):
-        if not words:
-            return ""
+        if not words: return ""
         s = " ".join(words)
         s = re.sub(r"\s+([,\.\?!;:])", r"\1", s)
         s = re.sub(r"\s{2,}", " ", s).strip()
@@ -679,29 +486,21 @@ class Markov:
                 s = s + "."
         return s
 
-    def generate(self, seed=None, max_words=40, capitalize_if=True):
-        """
-        Seed-aware generation:
-         - If seed has >=2 tokens and key exists -> continue from it (as before).
-         - If seed key missing -> find best backoff key by token overlap with seed.
-         - While ranking candidates, prefer tokens that occur in the seed (seed-match bonus).
-        """
+    def generate(self, seed=None, max_words=40, capitalize_if=True, topic:Optional[str]=None):
         seed_tokens = set(tokenize(seed)) if seed else set()
-        # continuation mode when seed given
+        topic_tokens = set(tokenize(topic)) if topic else set()
         if seed:
             toks = tokenize(seed)
             if len(toks) >= 2:
                 key = (toks[-2].lower(), toks[-1].lower())
-                # if exact key not present, try to find a related backoff key
                 if key not in self.map:
-                    backoff = self._find_best_backoff_key(seed_tokens)
+                    backoff = self._find_best_backoff_key(seed_tokens, topic_tokens)
                     if backoff:
                         key = backoff
                 continuation = []
                 for _ in range(max_words):
-                    ranked = self._rank_candidates(key, seed_tokens=seed_tokens)
+                    ranked = self._rank_candidates(key, seed_tokens, topic_tokens)
                     if not ranked:
-                        # backoff: aggregate followers where first part == key[1]
                         candidates = {}
                         for (a,b), nxts in self.map.items():
                             if a == key[1]:
@@ -711,30 +510,26 @@ class Markov:
                             break
                         temp_key = (key[1], "__BACKOFF__")
                         self.map[temp_key] = candidates
-                        ranked = self._rank_candidates(temp_key, seed_tokens=seed_tokens)
+                        ranked = self._rank_candidates(temp_key, seed_tokens, topic_tokens)
                         self.map.pop(temp_key, None)
                         if not ranked:
                             break
                     nxt = ranked[0][0]
-                    # avoid short-token loops
                     if len(continuation) >= 2 and continuation[-1] == nxt and len(nxt) <= 2:
                         break
                     continuation.append(nxt)
                     key = (key[1], nxt)
-                    # stop if we generated punctuation end
                     if re.fullmatch(r"[\.!\?]", nxt):
                         break
                 if continuation:
                     return self._finalize_sentence(continuation, capitalize_if=capitalize_if)
-        # No seed or couldn't continue: fall back to random-start generation (unchanged)
         if not self.starts:
             return ""
         key = random.choice(self.starts)
         out = [key[0], key[1]]
         for _ in range(max_words-2):
-            ranked = self._rank_candidates((out[-2], out[-1]), seed_tokens=None)
-            if not ranked:
-                break
+            ranked = self._rank_candidates((out[-2], out[-1]), seed_tokens=None, topic_tokens=topic_tokens if topic else None)
+            if not ranked: break
             nxt = ranked[0][0]
             out.append(nxt)
             if len(out) >= 5 and out[-1] == out[-2] == out[-3]:
@@ -743,9 +538,30 @@ class Markov:
                 break
         return self._finalize_sentence(out, capitalize_if=True)
 
-# instantiate improved Markov
-MARKOV = Markov()
+    def generate_paragraph(self, topic: Optional[str]=None, seed: Optional[str]=None,
+                           num_sentences: int = 3, max_words_per_sentence: int = 40,
+                           capitalize_if: bool = True) -> str:
+        topic_tokens = set(tokenize(topic)) if topic else set()
+        current_seed = seed
+        sentences = []
+        for i in range(num_sentences):
+            s = self.generate(seed=current_seed, max_words=max_words_per_sentence,
+                              capitalize_if=(capitalize_if if i==0 else True), topic=topic)
+            if not s:
+                s = self.generate(max_words=max_words_per_sentence, capitalize_if=True, topic=topic)
+            sentences.append(s)
+            toks = tokenize(s)
+            if len(toks) >= 2:
+                current_seed = " ".join(toks[-2:])
+            else:
+                current_seed = None
+        paragraph = " ".join(sentences)
+        paragraph = re.sub(r"\s+([,\.\?!;:])", r"\1", paragraph)
+        paragraph = re.sub(r"\s{2,}", " ", paragraph).strip()
+        return paragraph
 
+# instantiate markov
+MARKOV = Markov()
 
 def markov_serialize(m):
     out = {}
@@ -775,7 +591,7 @@ def train_markov_full():
     except Exception:
         pass
 
-# try load persisted markov on startup (fast)
+# load persisted markov if available
 try:
     mser = load_json(MARKOV_FILE, None)
     if mser and isinstance(mser, dict) and "map" in mser:
@@ -787,7 +603,7 @@ except Exception:
     train_markov_full()
 
 # -------------------------
-# Retrieval helpers
+# Retrieval/helpers
 # -------------------------
 LEARN_PATTERNS = [
     re.compile(r'^\s*define\s+([^\:]+)\s*[:\-]\s*(.+)$', re.I),
@@ -841,7 +657,7 @@ def lookup_kb(query: str) -> Tuple[Optional[str], float]:
     return None, 0.0
 
 # -------------------------
-# Build & train TinyNN model (on-demand)
+# Build & train TinyNN (on-demand)
 # -------------------------
 VOCAB: List[str] = []
 NN_MODEL: Optional[TinyNN] = None
@@ -881,7 +697,7 @@ def safe_eval_math(expr: str):
     except Exception:
         return None
 
-def compose_reply(user_text: str) -> Dict[str,Any]:
+def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences: Optional[int]=None) -> Dict[str,Any]:
     user = user_text.strip()
     lower = user.lower()
 
@@ -971,7 +787,7 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
             k = normalize_key(m.group(1))
             if k in defs:
                 return {"reply": format_definition(k, defs[k]), "meta":{"intent":"definition"}}
-        return {"reply": "I don't have that definition yet. Teach me with '/define word: definition' or 'X means Y'.", "meta":{"intent":"definition"}}
+        return {"reply":"I don't have that definition yet. Teach me with '/define word: definition' or 'X means Y'.", "meta":{"intent":"definition"}}
     if intent == "time":
         return {"reply": f"The current time is {datetime.now().strftime('%H:%M:%S')}", "meta":{"intent":"time"}}
     if intent == "date":
@@ -985,9 +801,18 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
     if mem:
         return {"reply": mem, "meta":{"intent":"memory"}}
 
-    # Markov generative fallback with controlled capitalization
+    # paragraph/topic generation if requested
+    if paragraph_sentences and paragraph_sentences > 0:
+        prev_ends_sentence = bool(re.search(r"[\.!\?]\s*$", user))
+        para = MARKOV.generate_paragraph(topic=topic, seed=(user if user else None),
+                                         num_sentences=paragraph_sentences, max_words_per_sentence=40,
+                                         capitalize_if=prev_ends_sentence)
+        if para:
+            return {"reply": para, "meta":{"intent":"gen_paragraph"}}
+
+    # Markov generative fallback
     prev_ends_sentence = bool(re.search(r"[\.!\?]\s*$", user))
-    gen = MARKOV.generate(seed=user, max_words=50, capitalize_if=prev_ends_sentence)
+    gen = MARKOV.generate(seed=user, max_words=50, capitalize_if=prev_ends_sentence, topic=topic)
     if gen:
         if gen.strip():
             if prev_ends_sentence:
@@ -999,7 +824,7 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
     return {"reply": "I don't know that yet. Teach me with 'X means Y' or '/define X: Y'.", "meta":{"intent":"unknown"}}
 
 # -------------------------
-# File ingestion (txt/json)
+# Ingest text into learned memory or convos
 # -------------------------
 def ingest_text_content(name: str, text: str, save_as_memory: bool=True):
     if not text:
@@ -1026,19 +851,19 @@ def ingest_text_content(name: str, text: str, save_as_memory: bool=True):
     return f"Ingested {added} blocks from {name}."
 
 # -------------------------
-# UI: Streamlit
+# Streamlit UI
 # -------------------------
-st.set_page_config(page_title="Omega-B", layout="wide", page_icon="✨")
-st.title("Omega-B (V2.2)")
+st.set_page_config(page_title="Jack — Offline AI (Full)", layout="wide")
+st.title("Jack — Offline AI (Full)")
 
 left, right = st.columns([3,1])
 
 with right:
     st.header("Memory & Model Controls")
     if st.button("Clear Conversation"):
-        ai_state["conversations"].clear(); save_json(STATE_FILE, ai_state); st.success("Conversation cleared."); st.rerun()
+        ai_state["conversations"].clear(); save_json(STATE_FILE, ai_state); st.success("Conversation cleared."); st.experimental_rerun()
     if st.button("Forget Learned Memories"):
-        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.success("All learned memories forgotten."); st.rerun()
+        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.success("All learned memories forgotten."); st.experimental_rerun()
 
     st.markdown("---")
     st.write("Model status:")
@@ -1052,7 +877,7 @@ with right:
             build_and_train_model(force=True)
             train_markov_full()
             st.success("Model rebuilt.")
-            st.rerun()
+            st.experimental_rerun()
 
     st.markdown("---")
     st.markdown("**Manage Learned**")
@@ -1064,7 +889,7 @@ with right:
                 st.write(f"• **{k}** — {ai_state['learned'][k].get('definition','')[:180]}")
             with colk2:
                 if st.button(f"Delete {k}", key=f"del_{k}"):
-                    ai_state["learned"].pop(k, None); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.rerun()
+                    ai_state["learned"].pop(k, None); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.experimental_rerun()
     else:
         st.write("_No learned items yet._")
 
@@ -1088,7 +913,7 @@ with right:
             if st.button("Ingest file"):
                 msg = ingest_text_content(uploaded.name, text, save_as_memory=save_as_memory)
                 st.success(msg)
-                st.rerun()
+                st.experimental_rerun()
         except Exception as e:
             st.error(f"Failed to read uploaded file: {e}")
 
@@ -1108,7 +933,7 @@ with right:
                 save_json(STATE_FILE, ai_state)
                 ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
                 st.success("Merged imported state. Model marked dirty.")
-                st.rerun()
+                st.experimental_rerun()
             else:
                 st.error("Imported file not in expected format.")
         except Exception as e:
@@ -1126,8 +951,11 @@ with left:
         st.write(m.get("text",""))
 
     st.markdown("---")
-    user_input = st.text_area("Message (Shift+Enter = newline)", height=120)
-    c1,c2,c3 = st.columns([1,1,1])
+    user_input = st.text_area("Message (Shift+Enter = newline)", height=140)
+    topic_input = st.text_input("Topic (optional, biases paragraph content)", value="")
+    num_sentences = st.slider("Paragraph length (sentences)", min_value=1, max_value=8, value=3)
+
+    c1,c2,c3,c4 = st.columns([1,1,1,1])
     if c1.button("Send"):
         ui = user_input.strip()
         if ui:
@@ -1138,12 +966,13 @@ with left:
             save_json(STATE_FILE, ai_state)
             MARKOV.train(ui); MARKOV.train(reply)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            st.rerun()
-    if c2.button("Complete"):
+            st.experimental_rerun()
+
+    if c2.button("Complete (single)"):
         ui = user_input.rstrip()
         if ui:
             prev_ends_sentence = bool(re.search(r"[\.!\?]\s*$", ui))
-            cont = MARKOV.generate(seed=ui, max_words=40, capitalize_if=prev_ends_sentence)
+            cont = MARKOV.generate(seed=ui, max_words=40, capitalize_if=prev_ends_sentence, topic=topic_input or None)
             if cont:
                 if prev_ends_sentence:
                     final = cont
@@ -1154,13 +983,24 @@ with left:
                 MARKOV.train(ui); MARKOV.train(final)
                 save_json(STATE_FILE, ai_state)
                 ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            else:
-                gen = MARKOV.generate(max_words=40)
+            st.experimental_rerun()
+
+    if c3.button("Generate Paragraph"):
+        ui = user_input.strip()
+        prev_ends_sentence = bool(re.search(r"[\.!\?]\s*$", ui))
+        para = MARKOV.generate_paragraph(topic=(topic_input or None), seed=(ui if ui else None),
+                                         num_sentences=num_sentences, max_words_per_sentence=40,
+                                         capitalize_if=prev_ends_sentence)
+        if para:
+            if ui:
                 ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
-                ai_state.setdefault("conversations", []).append({"role":"assistant","text":gen,"time":datetime.now().isoformat()})
-                save_json(STATE_FILE, ai_state)
-            st.rerun()
-    if c3.button("Teach (word: definition)"):
+            ai_state.setdefault("conversations", []).append({"role":"assistant","text":para,"time":datetime.now().isoformat()})
+            MARKOV.train(para)
+            save_json(STATE_FILE, ai_state)
+            ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
+            st.experimental_rerun()
+
+    if c4.button("Teach (word: definition)"):
         ui = user_input.strip()
         m = re.match(r'\s*([^\:]+)\s*[:\-]\s*(.+)', ui)
         if m:
@@ -1170,7 +1010,7 @@ with left:
             MARKOV.train(f"{w} {d}")
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
             st.success(f"Learned '{w}'. (Model rebuild recommended.)")
-            st.rerun()
+            st.experimental_rerun()
         else:
             st.warning("To teach: enter `word: definition` (e.g. gravity: a force that pulls)")
 
@@ -1181,5 +1021,6 @@ st.markdown("""
 - Teach: `gravity means a force that pulls` or `/define gravity: a force that pulls`  
 - Math: `12 * (3 + 4)`  
 - Time/Date: `what is the time?` or `what is the date?`  
+- Paragraph: type a seed (optional) and a Topic, then click **Generate Paragraph**  
 - Commands: `/clear` (clear conversation), `/forget` (clear learned memories), `/delete N` (delete conversation #N)
 """)
