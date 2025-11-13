@@ -143,13 +143,222 @@ def merged_dictionary() -> Dict[str, Dict[str,Any]]:
 # -------------------------
 # Knowledge base for quick facts
 # -------------------------
-KB: Dict[str,str] = {
-    "who was the first president of the united states": "George Washington",
-    "capital of france": "Paris",
-    "largest planet": "Jupiter",
-    "what is pi": "Pi is approximately 3.14159",
-    "who wrote hamlet": "William Shakespeare",
+# -------------------------
+# Big Knowledge base for quick facts (large)
+# Keys are lowercase normalized question phrases
+# -------------------------
+KB = {
+    # History & dates
+    "who was the first president of the united states": "George Washington (1789–1797).",
+    "who was the first us president": "George Washington (1789–1797).",
+    "who was the 16th president of the united states": "Abraham Lincoln (1861–1865).",
+    "when was the declaration of independence signed": "The U.S. Declaration of Independence was adopted on July 4, 1776.",
+    "when did world war i start": "World War I began in 1914.",
+    "when did world war i end": "World War I ended in 1918.",
+    "when did world war ii start": "World War II began in 1939.",
+    "when did world war ii end": "World War II ended in 1945.",
+    "who discovered america": "Christopher Columbus's 1492 voyage reached the Americas for Europe; indigenous peoples lived there long before.",
+    "who discovered penicillin": "Alexander Fleming is credited with discovering penicillin in 1928.",
+    "when was napoleon defeated": "Napoleon was finally defeated at the Battle of Waterloo in 1815.",
+
+    # Capitals & countries
+    "capital of france": "Paris.",
+    "capital of germany": "Berlin.",
+    "capital of spain": "Madrid.",
+    "capital of italy": "Rome.",
+    "capital of united kingdom": "London.",
+    "capital of the united states": "Washington, D.C.",
+    "capital of canada": "Ottawa.",
+    "capital of australia": "Canberra.",
+    "capital of russia": "Moscow.",
+    "capital of china": "Beijing.",
+    "capital of japan": "Tokyo.",
+    "capital of india": "New Delhi.",
+    "which country has the largest population": "China (followed closely by India).",
+    "which is the largest country by area": "Russia is the largest country by area.",
+    "which continent is brazil in": "Brazil is in South America.",
+    "what is the largest ocean": "The Pacific Ocean.",
+
+    # Science & nature
+    "what is gravity": "Gravity is the force by which objects with mass attract each other (≈9.81 m/s² near Earth's surface).",
+    "what is photosynthesis": "A process by which plants convert light energy into chemical energy, producing oxygen and glucose from CO₂ and water.",
+    "what is the largest planet": "Jupiter.",
+    "what is the smallest planet": "Mercury (excluding dwarf planets).",
+    "what is the sun": "The Sun is a star at the center of the Solar System that supplies light and heat to Earth.",
+    "how far is the earth from the sun": "About 1 astronomical unit ≈ 149.6 million kilometers (≈93 million miles).",
+    "what is dna": "DNA (deoxyribonucleic acid) stores genetic information in living organisms.",
+    "what is rna": "RNA (ribonucleic acid) is a molecule involved in coding, decoding, regulation, and expression of genes.",
+    "what is a gene": "A gene is a unit of heredity made of DNA that codes for a protein or functional product.",
+    "what is cellular respiration": "A process cells use to convert nutrients into energy (ATP), producing CO₂ and water.",
+    "what is an atom": "The smallest unit of ordinary matter, made of protons, neutrons, and electrons.",
+    "what is a molecule": "Two or more atoms chemically bonded together.",
+
+    # Math & constants
+    "what is pi": "Pi (π) ≈ 3.141592653589793 — the ratio of a circle's circumference to its diameter.",
+    "what is e": "Euler's number e ≈ 2.718281828 — the base of natural logarithms.",
+    "what is the speed of light": "Approximately 299,792,458 meters per second in vacuum.",
+    "what is avogadros number": "Avogadro's number ≈ 6.02214076 × 10^23 (particles per mole).",
+    "what is 2 plus 2": "2 + 2 = 4.",
+    "what is the square root of 9": "The square root of 9 is 3.",
+    "how many degrees in a circle": "360 degrees.",
+    "what is a prime number": "A number greater than 1 with no positive divisors other than 1 and itself.",
+
+    # Units & conversions
+    "how many centimeters in a meter": "100 centimeters in 1 meter.",
+    "how many meters in a kilometer": "1000 meters in 1 kilometer.",
+    "how many inches in a foot": "12 inches in 1 foot.",
+    "how many feet in a yard": "3 feet in 1 yard.",
+    "how many ounces in a pound": "16 ounces in 1 pound (avoirdupois).",
+    "convert celsius to fahrenheit": "°F = °C × 9/5 + 32.",
+    "convert fahrenheit to celsius": "°C = (°F − 32) × 5/9.",
+
+    # Biology & health (general info, not medical advice)
+    "what is a fever": "A fever is a raised body temperature, often a sign of infection. Adults: temps above ~38°C (100.4°F).",
+    "what is dehydration": "A condition when the body loses more fluids than it takes in; symptoms include thirst, low urine output, dizziness.",
+    "what is a vaccination": "A vaccine stimulates the immune system to develop protection against a disease-causing organism.",
+    "what is an antibiotic": "A medicine that destroys or inhibits the growth of bacteria; not effective against viruses.",
+    "what is a virus": "A tiny infectious agent that needs a host cell to replicate.",
+
+    # Computers & technology
+    "what is python": "Python is a high-level programming language known for readability and wide use in scripting and data science.",
+    "what is an api": "An API (Application Programming Interface) allows software systems to communicate and exchange data.",
+    "what is machine learning": "A field of AI where models learn patterns from data to make predictions or decisions.",
+    "what is a database": "A structured collection of data stored and accessed electronically.",
+    "what is cloud computing": "Delivery of computing services (servers, storage, databases, networking) over the internet.",
+    "what is github": "A web-based platform for hosting and collaborating on Git repositories (code).",
+    "what is linux": "An open-source family of Unix-like operating systems based on the Linux kernel.",
+
+    # Web / internet basics
+    "what is http": "HTTP is the Hypertext Transfer Protocol used for transferring web pages on the internet.",
+    "what is https": "HTTPS is HTTP over TLS/SSL — it encrypts web traffic for security.",
+    "what is a url": "A Uniform Resource Locator — the address used to access resources on the web.",
+    "what is dns": "Domain Name System — translates human-readable domain names to IP addresses.",
+
+    # Programming basics
+    "what is a variable": "A named storage location that holds a value in programming.",
+    "what is a function": "A reusable block of code that performs a specific task.",
+    "what is a loop": "A programming construct that repeats a block of code while a condition holds true.",
+    "what is recursion": "When a function calls itself to solve smaller instances of a problem.",
+
+    # Literature & arts
+    "who wrote hamlet": "William Shakespeare.",
+    "who wrote pride and prejudice": "Jane Austen.",
+    "who painted the mona lisa": "Leonardo da Vinci.",
+    "what is a sonnet": "A 14-line poem with a specific rhyme scheme, often about love or philosophy.",
+
+    # People & biographies (short)
+    "who is elon musk": "Entrepreneur: SpaceX, Tesla, Neuralink, among others (roles may change over time).",
+    "who is barack obama": "44th President of the United States (2009–2017).",
+    "who is albert einstein": "Physicist known for the theory of relativity and contributions to quantum mechanics.",
+    "who discovered america": "Christopher Columbus's 1492 voyage reached the Americas for Europe; indigenous peoples inhabited the continents long before.",
+
+    # Geography & travel
+    "what is the highest mountain": "Mount Everest is the highest mountain above sea level (≈8,848 m).",
+    "what is the longest river": "The Nile and Amazon are both contenders depending on measurement method; commonly the Nile is cited as the longest.",
+    "what currency does the united states use": "United States dollar (USD).",
+    "what currency does japan use": "Japanese yen (JPY).",
+    "what language is spoken in brazil": "Portuguese is the official language of Brazil.",
+
+    # Food & cooking
+    "how do i boil an egg": "Place eggs in boiling water and cook 6–8 minutes for medium, 9–12 minutes for hard; cool in cold water to stop cooking.",
+    "how to make coffee": "Brew ground coffee with hot water using your preferred method (drip, French press, espresso), adjusting coffee-to-water ratio to taste.",
+    "what is baking soda": "Sodium bicarbonate, a leavening agent used in baking.",
+    "what is baking powder": "A mixture that contains baking soda and acids to create chemical leavening when moistened and heated.",
+
+    # Practical 'how-to' & everyday tasks
+    "how to tie a tie": "A common method is the four-in-hand knot: wrap the wide end over the narrow, loop, bring through and tighten. Many illustrated tutorials online.",
+    "how to reset a password": "Use the service's 'forgot password' link to receive reset instructions via email or SMS; follow provider-specific steps.",
+    "how to take a screenshot": "On Windows: PrtScn or Win+Shift+S; macOS: Cmd+Shift+3 or Cmd+Shift+4; many phones use power+volume buttons.",
+    "how to unzip a file": "On many systems you can right-click → Extract; or use command-line tools like unzip (Linux/macOS) or Expand-Archive (PowerShell).",
+
+    # Sports & entertainment
+    "how many players in a soccer team": "11 players on the field per team in association football (soccer).",
+    "how many players in basketball": "5 players on the court per team in basketball.",
+    "what is the super bowl": "The NFL's annual championship game in American football (United States).",
+
+    # Law & civics (general)
+    "how to register to vote": "Voter registration procedures vary by country and state — check your local election authority for requirements and deadlines.",
+    "what is a constitution": "A set of fundamental principles or established precedents according to which a state is governed.",
+
+    # Business & finance
+    "what is inflation": "A general rise in prices and fall in purchasing power of money.",
+    "what is a stock": "A share of ownership in a company.",
+    "what is interest rate": "The percentage charged on a loan or paid on savings, typically expressed annually.",
+
+    # Short definitions
+    "definition of algorithm": "A step-by-step procedure for solving a problem or performing a task.",
+    "definition of computer": "An electronic device that processes data according to programmed instructions.",
+    "definition of democracy": "A system of government by the whole population, typically through elected representatives.",
+
+    # Quick facts & trivia
+    "what is the boiling point of water": "100 °C (212 °F) at standard atmospheric pressure (sea level).",
+    "what is the freezing point of water": "0 °C (32 °F) at standard atmospheric pressure.",
+    "how many seconds in a minute": "60 seconds.",
+    "how many minutes in an hour": "60 minutes.",
+    "how many hours in a day": "24 hours.",
+    "how many days in a year": "365 days (366 in a leap year).",
+
+    # Science history & discoveries
+    "who proposed the theory of relativity": "Albert Einstein proposed the theory of relativity.",
+    "who discovered electricity": "Electric phenomena were studied over centuries; Benjamin Franklin, Alessandro Volta, Michael Faraday, and others made key discoveries.",
+
+    # Computing concepts
+    "what is encryption": "The process of encoding information so only authorized parties can read it.",
+    "what is a firewall": "A system that monitors and controls incoming and outgoing network traffic based on security rules.",
+    "what is a virus (computer)": "Malicious software that can replicate and damage systems or data.",
+
+    # Education & institutions
+    "what is mit": "Massachusetts Institute of Technology (MIT), a research university in Cambridge, Massachusetts.",
+    "what is harvard": "Harvard University, an Ivy League research university in Cambridge, Massachusetts.",
+
+    # Weather & climate
+    "what causes rain": "Condensed water vapor in clouds forms droplets that fall as precipitation when heavy enough.",
+    "what is climate change": "Long-term changes in average weather patterns, including global warming driven largely by greenhouse gas emissions.",
+
+    # Astronomy
+    "what is a black hole": "A region of spacetime with gravity so strong that nothing, not even light, can escape from it.",
+    "what is a galaxy": "A system of stars, gas, dust, and dark matter bound together by gravity (e.g., the Milky Way).",
+    "how many planets in the solar system": "There are eight planets: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune.",
+
+    # Language & grammar
+    "what is a noun": "A word that names a person, place, thing, or idea.",
+    "what is a verb": "A word that expresses an action, occurrence, or state of being.",
+    "what is an adjective": "A word that modifies or describes a noun.",
+
+    # Travel & transport
+    "what is an airport": "A facility where aircraft take off and land; includes runways, terminals, and support services.",
+    "how to get a passport": "Apply through your country's passport authority; requirements typically include ID, photos, and fees.",
+
+    # Safety & emergencies
+    "what to do in a fire": "Get out quickly, stay low to avoid smoke, call emergency services when safe, and follow evacuation plans.",
+    "what to do for a heart attack": "Call emergency services immediately; if trained, begin CPR if the person is unresponsive and not breathing normally.",
+
+    # Consumer & shopping
+    "how to return an item": "Check the seller's return policy, keep the receipt, and follow the provider's return/exchange instructions.",
+    "how to check a warranty": "Review the product documentation or the manufacturer's website for warranty terms and claim process.",
+
+    # Arts & culture
+    "what is jazz": "A music genre that originated in African-American communities, known for improvisation and syncopated rhythms.",
+    "what is classical music": "Art music rooted in Western traditions, spanning from the medieval era to the contemporary period.",
+
+    # Misc short useful facts
+    "what is the internet": "A global network connecting computers and other devices for data exchange.",
+    "what is email": "Electronic mail — messages sent over the internet between users.",
+    "how to send an email": "Use an email client or webmail, compose a message, enter recipient address, subject, body, and press send.",
+
+    # Localized or alternate phrasings to help matching
+    "who was the first president of the u s a": "George Washington (1789–1797).",
+    "who wrote hamlet play": "William Shakespeare.",
+    "what is the capital of france": "Paris.",
+    "what is the capital of the united states": "Washington, D.C.",
+
+    # Short fallback hints
+    "who invented the telephone": "Alexander Graham Bell is often credited, though others contributed to telephone-like inventions.",
+    "who invented the light bulb": "Thomas Edison improved and commercialized electric light; others like Humphry Davy and Joseph Swan made earlier contributions.",
+
+    # Add more if needed...
 }
+
 
 # -------------------------
 # Tokenization & vocab (cached)
