@@ -210,7 +210,7 @@ def build_training(vocab: List[str]) -> List[Tuple[List[float], int]]:
     return data
 
 # -------------------------
-# Markov fallback generator
+# Markov fallback generator (improved for seed-completion)
 # -------------------------
 class Markov:
     def __init__(self):
@@ -220,6 +220,7 @@ class Markov:
     def train(self, text: str):
         toks = tokenize(text)
         if len(toks) < 3: return
+        # store starting bigrams
         self.starts.append((toks[0].lower(), toks[1].lower()))
         for i in range(len(toks)-2):
             key = (toks[i].lower(), toks[i+1].lower())
@@ -227,28 +228,64 @@ class Markov:
             self.map.setdefault(key, {})
             self.map[key][nxt] = self.map[key].get(nxt, 0) + 1
 
+    def _weighted_choice(self, choices: Dict[str,int]) -> Optional[str]:
+        total = sum(choices.values())
+        if total == 0: return None
+        r = random.randint(1, total)
+        acc = 0
+        for w,cnt in choices.items():
+            acc += cnt
+            if r <= acc:
+                return w
+        return None
+
     def generate(self, seed: str=None, max_words:int=40) -> str:
+        """
+        If seed is provided and contains at least two tokens that exist in the model,
+        generate only the continuation (new words) and return that continuation string.
+        Otherwise, produce a fresh short sentence (full text).
+        """
         if seed:
             toks = tokenize(seed)
             if len(toks) >= 2:
                 key = (toks[-2].lower(), toks[-1].lower())
-            else:
-                key = random.choice(self.starts) if self.starts else None
-        else:
-            key = random.choice(self.starts) if self.starts else None
-        if not key: return ""
+                # if we know this bigram, try to continue from it
+                if key in self.map:
+                    out = [key[0], key[1]]
+                    new_words = []
+                    for _ in range(max_words):
+                        choices = self.map.get((out[-2], out[-1]))
+                        if not choices:
+                            break
+                        nxt = self._weighted_choice(choices)
+                        if not nxt:
+                            break
+                        out.append(nxt)
+                        new_words.append(nxt)
+                        # small stop condition: if word ends with sentence-like token in original data? we don't have punctuation tokens,
+                        # so just allow up to max_words.
+                    # join new words into a continuation; do not repeat the seed tokens
+                    if new_words:
+                        cont = " ".join(new_words)
+                        # restore capitalization if seed ends with capitalized word
+                        if seed.strip() and seed.strip()[-1] not in ".!?":
+                            # if seed ends without punctuation, join with a space preserving seed punctuation/casing
+                            # ensure first letter of continuation is lowercase if seed ends mid-sentence; else match casing
+                            if seed.strip() and seed.strip()[-1].isupper():
+                                cont = cont.capitalize()
+                        return cont
+            # fallback to trying to find any start if seed doesn't help
+        # no seed or couldn't continue: generate a full-ish sentence
+        if not self.starts:
+            return ""
+        key = random.choice(self.starts)
         out = [key[0], key[1]]
         for _ in range(max_words-2):
             choices = self.map.get((out[-2], out[-1]))
             if not choices: break
-            total = sum(choices.values())
-            r = random.randint(1, total)
-            acc = 0
-            for w,cnt in choices.items():
-                acc += cnt
-                if r <= acc:
-                    out.append(w)
-                    break
+            nxt = self._weighted_choice(choices)
+            if not nxt: break
+            out.append(nxt)
         return " ".join(out)
 
 MARKOV = Markov()
@@ -460,7 +497,17 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
     # Markov generative fallback
     gen = MARKOV.generate(seed=user, max_words=50)
     if gen:
-        return {"reply": gen.capitalize() + ".", "meta":{"intent":"gen"}}
+        # If gen looks like a pure continuation (no repeated seed), join intelligently:
+        # If generate produced text starting with the last word of seed, avoid duplication.
+        # The MARKOV.generate seed-mode returns only new words (by design), so prefer to append.
+        if gen.strip():
+            # if user already ends with punctuation, append with space; otherwise put a space
+            if user and user.strip()[-1] in ".!?":
+                reply_text = gen.capitalize() + "."
+            else:
+                # join seed + continuation
+                reply_text = (user.rstrip() + " " + gen).strip()
+            return {"reply": reply_text, "meta":{"intent":"gen"}}
 
     return {"reply": "I don't know that yet. Teach me with 'X means Y' or '/define X: Y'.", "meta":{"intent":"unknown"}}
 
@@ -598,11 +645,24 @@ with left:
             incremental_retrain(); train_markov()
             st.rerun()
     if c2.button("Complete"):
-        ui = user_input.strip()
+        ui = user_input.rstrip()
         if ui:
-            comp = MARKOV.generate(seed=ui, max_words=40) or (ui + " ...")
-            ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
-            ai_state.setdefault("conversations", []).append({"role":"assistant","text":comp,"time":datetime.now().isoformat()})
+            # improved completion: get continuation (only new words) and append to the seed intelligently
+            cont = MARKOV.generate(seed=ui, max_words=40)
+            if cont:
+                # if seed already ends with punctuation, capitalize continuation and join with space
+                if ui and ui.strip()[-1] in ".!?":
+                    final = ui.rstrip() + " " + cont.capitalize()
+                else:
+                    # join seed + continuation; avoid double spaces
+                    final = (ui + " " + cont).strip()
+                ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
+                ai_state.setdefault("conversations", []).append({"role":"assistant","text":final,"time":datetime.now().isoformat()})
+            else:
+                # fallback: generate a standalone sequence
+                gen = MARKOV.generate(max_words=40)
+                ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
+                ai_state.setdefault("conversations", []).append({"role":"assistant","text":gen,"time":datetime.now().isoformat()})
             save_json(STATE_FILE, ai_state)
             st.rerun()
     if c3.button("Teach (word: definition)"):
@@ -627,5 +687,3 @@ st.markdown("""
 - Time/Date: `what is the time?` or `what is the date?`  
 - Commands: `/clear` (clear conversation), `/forget` (clear learned memories), `/delete N` (delete conversation #N)
 """)
-
-
