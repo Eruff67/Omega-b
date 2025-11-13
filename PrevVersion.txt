@@ -44,11 +44,288 @@ ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings"
 # -------------------------
 # You can later upload/merge a richer dictionary.json via UI
 BASE_DICT = {
-    "george washington": {"definition":"The first President of the United States (1789–1797).","type":"proper_noun","examples":["George Washington led the Continental Army."]},
-    "abraham lincoln": {"definition":"16th U.S. President, led during the Civil War.","type":"proper_noun","examples":["Abraham Lincoln issued the Emancipation Proclamation."]},
-    "paris": {"definition":"Capital of France.","type":"proper_noun","examples":["Paris is known for the Eiffel Tower."]},
-    "python": {"definition":"High-level programming language popular for scripting and data science.","type":"noun","examples":["I used Python to write that script."]},
-    "pi": {"definition":"Mathematical constant π ≈ 3.14159.","type":"number","examples":["Pi is used to compute circle properties."]}
+    BASE_DICT = {
+    # Proper nouns / entities
+    "george washington": {
+        "definition": "The first President of the United States (1789–1797).",
+        "type": "proper_noun",
+        "examples": ["George Washington led the Continental Army.", "George Washington became the first U.S. president in 1789."]
+    },
+    "abraham lincoln": {
+        "definition": "16th President of the United States; led the nation during the Civil War.",
+        "type": "proper_noun",
+        "examples": ["Abraham Lincoln issued the Emancipation Proclamation.", "Lincoln delivered the Gettysburg Address."]
+    },
+    "paris": {
+        "definition": "Capital and largest city of France.",
+        "type": "place",
+        "examples": ["Paris is known for the Eiffel Tower.", "Many artists have lived and worked in Paris."]
+    },
+
+    # Common nouns
+    "time": {
+        "definition": "A continuous, measurable quantity in which events occur in a sequence.",
+        "type": "noun",
+        "examples": ["Time passes quickly when you are busy.", "What time is the meeting?"]
+    },
+    "person": {
+        "definition": "A human being regarded as an individual.",
+        "type": "noun",
+        "examples": ["Every person has their own story.", "She is a kind person."]
+    },
+    "year": {
+        "definition": "A period of 365 (or 366) days, used for reckoning time in calendars.",
+        "type": "noun",
+        "examples": ["The year 2024 had many changes.", "I travel once a year."]
+    },
+    "way": {
+        "definition": "A method, style, or manner of doing something.",
+        "type": "noun",
+        "examples": ["There is more than one way to solve the problem.", "She found a way to fix it."]
+    },
+    "day": {
+        "definition": "A 24-hour period; the time from one midnight to the next.",
+        "type": "noun",
+        "examples": ["Today is a sunny day.", "We work five days a week."]
+    },
+    "thing": {
+        "definition": "An object, concept, or matter that is not specifically named.",
+        "type": "noun",
+        "examples": ["That is a useful thing to know.", "Put the thing on the table."]
+    },
+    "world": {
+        "definition": "The earth, together with all of its countries and peoples.",
+        "type": "noun",
+        "examples": ["The world is full of diverse cultures.", "She traveled around the world."]
+    },
+    "life": {
+        "definition": "The existence of an individual human being or animal.",
+        "type": "noun",
+        "examples": ["Life is full of surprises.", "He leads a simple life."]
+    },
+    "idea": {
+        "definition": "A thought or suggestion as to a possible course of action.",
+        "type": "noun",
+        "examples": ["That's a good idea.", "She shared an idea during the meeting."]
+    },
+    "problem": {
+        "definition": "A matter or situation regarded as unwelcome or harmful and needing to be dealt with.",
+        "type": "noun",
+        "examples": ["We solved the problem together.", "This is a tricky problem to fix."]
+    },
+
+    # Common verbs (base forms)
+    "be": {
+        "definition": "Exist; occur; take place; have a specified quality or condition.",
+        "type": "verb",
+        "examples": ["I want to be helpful.", "There will be a meeting at noon."]
+    },
+    "have": {
+        "definition": "Possess, own, or hold.",
+        "type": "verb",
+        "examples": ["I have an idea.", "They have three children."]
+    },
+    "do": {
+        "definition": "Perform or carry out an action or task.",
+        "type": "verb",
+        "examples": ["I will do the work.", "What did you do today?"]
+    },
+    "say": {
+        "definition": "Utter words to convey information, an opinion, a feeling or intention.",
+        "type": "verb",
+        "examples": ["Please say your name.", "He didn't say much."]
+    },
+    "go": {
+        "definition": "Move from one place to another; travel.",
+        "type": "verb",
+        "examples": ["Let's go to the store.", "She goes to school by bus."]
+    },
+    "get": {
+        "definition": "Come to have or hold; receive or obtain.",
+        "type": "verb",
+        "examples": ["I need to get groceries.", "Did you get my message?"]
+    },
+    "make": {
+        "definition": "Form (something) by putting parts together or combining substances.",
+        "type": "verb",
+        "examples": ["She will make a cake.", "We make plans every week."]
+    },
+    "know": {
+        "definition": "Be aware of through observation, inquiry, or information.",
+        "type": "verb",
+        "examples": ["I know the answer.", "Do you know her?"]
+    },
+    "think": {
+        "definition": "Use one's mind actively to form connected ideas.",
+        "type": "verb",
+        "examples": ["I think this will work.", "He thinks carefully before speaking."]
+    },
+    "take": {
+        "definition": "Lay hold of (something) with one's hands; move with it.",
+        "type": "verb",
+        "examples": ["Take your umbrella.", "She will take the train."]
+    },
+    "see": {
+        "definition": "Perceive with the eyes; understand or realize.",
+        "type": "verb",
+        "examples": ["I see what you mean.", "Can you see the mountain?"]
+    },
+
+    # Adjectives
+    "good": {
+        "definition": "Having desirable or positive qualities.",
+        "type": "adjective",
+        "examples": ["She did a good job.", "That's a good idea."]
+    },
+    "new": {
+        "definition": "Not existing before; made, introduced, or discovered recently.",
+        "type": "adjective",
+        "examples": ["I bought a new book.", "This is a new experience."]
+    },
+    "first": {
+        "definition": "Coming before all others in time or order.",
+        "type": "adjective",
+        "examples": ["His first attempt succeeded.", "We visited the city for the first time."]
+    },
+    "last": {
+        "definition": "Coming after all others in time or order; final.",
+        "type": "adjective",
+        "examples": ["She finished last.", "This is the last chapter."]
+    },
+    "long": {
+        "definition": "Measuring a great distance from end to end.",
+        "type": "adjective",
+        "examples": ["It was a long journey.", "She has long hair."]
+    },
+
+    # Adverbs / connectors
+    "very": {
+        "definition": "To a high degree.",
+        "type": "adverb",
+        "examples": ["This is very important.", "She was very happy."]
+    },
+    "often": {
+        "definition": "Frequently; many times.",
+        "type": "adverb",
+        "examples": ["I often go for a walk.", "We often eat together."]
+    },
+    "always": {
+        "definition": "At all times; on every occasion.",
+        "type": "adverb",
+        "examples": ["She always arrives early.", "I will always remember you."]
+    },
+    "never": {
+        "definition": "At no time in the past or future; not ever.",
+        "type": "adverb",
+        "examples": ["I never said that.", "He never eats mushrooms."]
+    },
+    "sometimes": {
+        "definition": "Occasionally; at certain times.",
+        "type": "adverb",
+        "examples": ["Sometimes I bake bread.", "We sometimes travel in summer."]
+    },
+
+    # Prepositions / short function words
+    "in": {
+        "definition": "Expressing the situation of being enclosed or surrounded by something.",
+        "type": "preposition",
+        "examples": ["The book is in the bag.", "She lives in Paris."]
+    },
+    "on": {
+        "definition": "Physically in contact with and supported by a surface.",
+        "type": "preposition",
+        "examples": ["Put it on the table.", "The picture is on the wall."]
+    },
+    "at": {
+        "definition": "Used to indicate a point in space or time.",
+        "type": "preposition",
+        "examples": ["Meet me at noon.", "She is good at painting."]
+    },
+    "with": {
+        "definition": "Accompanied by (another person or thing).",
+        "type": "preposition",
+        "examples": ["I'll come with you.", "Serve with a side salad."]
+    },
+    "about": {
+        "definition": "On the subject of; concerning.",
+        "type": "preposition",
+        "examples": ["We talked about the project.", "A story about friendship."]
+    },
+
+    # Useful phrases / multiword entries
+    "there is": {
+        "definition": "Used to indicate the existence of something.",
+        "type": "phrase",
+        "examples": ["There is a problem we must fix.", "There is a book on the shelf."]
+    },
+    "i think": {
+        "definition": "A common phrase expressing an opinion.",
+        "type": "phrase",
+        "examples": ["I think this is fine.", "I think we should go now."]
+    },
+    "for example": {
+        "definition": "Used to introduce an illustrative example.",
+        "type": "phrase",
+        "examples": ["Many fruits, for example apples and oranges, are healthy.", "Use punctuation correctly, for example commas."]
+    },
+    "in order to": {
+        "definition": "With the purpose of; so as to.",
+        "type": "phrase",
+        "examples": ["We study in order to learn.", "He trained hard in order to win."]
+    },
+
+    # Question words
+    "who": {
+        "definition": "Asking for a person or people.",
+        "type": "question_word",
+        "examples": ["Who is at the door?", "Who wrote this letter?"]
+    },
+    "what": {
+        "definition": "Asking for information specifying something.",
+        "type": "question_word",
+        "examples": ["What time is it?", "What is your favorite color?"]
+    },
+    "when": {
+        "definition": "Asking for a time or occasion.",
+        "type": "question_word",
+        "examples": ["When will you arrive?", "When is the meeting?"]
+    },
+    "where": {
+        "definition": "Asking for a place or location.",
+        "type": "question_word",
+        "examples": ["Where do you live?", "Where is the station?"]
+    },
+    "why": {
+        "definition": "Asking for a reason or purpose.",
+        "type": "question_word",
+        "examples": ["Why are you late?", "Why does this work?"]
+    },
+
+    # A few domain-specific / helpful concepts
+    "python": {
+        "definition": "A high-level programming language popular for scripting and data science.",
+        "type": "noun",
+        "examples": ["I used Python to write that script.", "Python has clear syntax."]
+    },
+    "gravity": {
+        "definition": "The force that attracts a body toward the centre of the earth, or toward any other physical body having mass.",
+        "type": "noun",
+        "examples": ["Gravity keeps us on the ground.", "The apple fell because of gravity."]
+    },
+    "pi": {
+        "definition": "Mathematical constant π ≈ 3.14159.",
+        "type": "number",
+        "examples": ["Pi is used to compute circle properties.", "The value of pi is approximately 3.14159."]
+    },
+
+    # Misc shorter entries to increase vocabulary richness
+    "ask": {"definition":"Request information or an answer from someone.","type":"verb","examples":["Ask a friend for help.","She will ask the teacher."]},
+    "answer": {"definition":"A response to a question.","type":"noun","examples":["Give the correct answer.","His answer was surprising."]},
+    "find": {"definition":"Discover something after searching or effort.","type":"verb","examples":["I need to find my keys.", "She found a good solution."]},
+    "help": {"definition":"Make it easier for someone to do something by offering one's services or resources.","type":"verb","examples":["Can you help me?", "Thanks for your help."]},
+    "learn": {"definition":"Gain or acquire knowledge or skill in (something) by study, experience, or being taught.","type":"verb","examples":["I want to learn French.", "We learn from mistakes."]},
+    "use": {"definition":"Employ for a particular purpose.","type":"verb","examples":["Use a pencil to write.", "How do I use this tool?"]},
+    "goodbye": {"definition":"A conventional expression used at parting.","type":"interjection","examples":["Goodbye and take care.", "He said goodbye before leaving."]},
 }
 
 # merge external dictionary file if present at startup
@@ -210,16 +487,19 @@ def build_training(vocab: List[str]) -> List[Tuple[List[float], int]]:
     return data
 
 # -------------------------
-# Markov fallback generator
+# Markov fallback generator (greedy next-word continuation)
 # -------------------------
 class Markov:
     def __init__(self):
-        self.map = {}
-        self.starts = []
+        # map: (w1,w2) -> { next_word: count, ... }
+        self.map: Dict[Tuple[str,str], Dict[str,int]] = {}
+        # list of starting bigrams observed
+        self.starts: List[Tuple[str,str]] = []
 
     def train(self, text: str):
         toks = tokenize(text)
-        if len(toks) < 3: return
+        if len(toks) < 3:
+            return
         self.starts.append((toks[0].lower(), toks[1].lower()))
         for i in range(len(toks)-2):
             key = (toks[i].lower(), toks[i+1].lower())
@@ -227,28 +507,75 @@ class Markov:
             self.map.setdefault(key, {})
             self.map[key][nxt] = self.map[key].get(nxt, 0) + 1
 
+    def _best_choice(self, choices: Dict[str,int]) -> Optional[str]:
+        """Return the most likely next token (argmax)."""
+        if not choices:
+            return None
+        # pick token with max count; tie-break deterministically by sorted order
+        best = max(sorted(choices.items()), key=lambda kv: kv[1])
+        return best[0]
+
+    def _best_unigram_after(self, token: str) -> Optional[str]:
+        """Backoff: look for bigrams that start with token and choose most common follower overall."""
+        candidates: Dict[str,int] = {}
+        for (a,b), nxts in self.map.items():
+            if a == token:
+                for w,cnt in nxts.items():
+                    candidates[w] = candidates.get(w,0) + cnt
+        if not candidates:
+            return None
+        return self._best_choice(candidates)
+
     def generate(self, seed: str=None, max_words:int=40) -> str:
+        """
+        Deterministic greedy generation:
+         - If seed has >=2 tokens and we have a matching bigram, greedily pick the most likely next word
+           and repeat using the last two words each step, returning only the NEW words (continuation).
+         - Back off to a unigram-after-last-token heuristic if exact bigram missing.
+         - If no seed or nothing found, generate a full sentence starting from a random observed start.
+        """
         if seed:
             toks = tokenize(seed)
             if len(toks) >= 2:
+                # start from the last two tokens of the seed (lowercased)
                 key = (toks[-2].lower(), toks[-1].lower())
-            else:
-                key = random.choice(self.starts) if self.starts else None
-        else:
-            key = random.choice(self.starts) if self.starts else None
-        if not key: return ""
+                continuation: List[str] = []
+                # greedy loop
+                for _ in range(max_words):
+                    # try exact bigram
+                    if key in self.map:
+                        nxt = self._best_choice(self.map[key])
+                    else:
+                        # backoff: try best unigram after the last token
+                        nxt = self._best_unigram_after(key[1])
+                    if not nxt:
+                        break
+                    continuation.append(nxt)
+                    # shift window
+                    key = (key[1], nxt)
+                    # small safety: avoid infinite loops when model repeats the same word forever
+                    if len(continuation) >= 2 and continuation[-1] == continuation[-2]:
+                        break
+                # return only new words (don't repeat the seed)
+                if continuation:
+                    return " ".join(continuation)
+                # else fall back to trying to generate from any starting bigram below
+        # No seed or couldn't continue: generate full sentence using greedy choices from a start bigram
+        if not self.starts:
+            return ""
+        key = random.choice(self.starts)
         out = [key[0], key[1]]
         for _ in range(max_words-2):
             choices = self.map.get((out[-2], out[-1]))
-            if not choices: break
-            total = sum(choices.values())
-            r = random.randint(1, total)
-            acc = 0
-            for w,cnt in choices.items():
-                acc += cnt
-                if r <= acc:
-                    out.append(w)
-                    break
+            if not choices:
+                break
+            nxt = self._best_choice(choices)
+            if not nxt:
+                break
+            out.append(nxt)
+            # stop if repetitive
+            if len(out) >= 3 and out[-1] == out[-2] == out[-3]:
+                break
         return " ".join(out)
 
 MARKOV = Markov()
@@ -457,10 +784,15 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
     if mem:
         return {"reply": mem, "meta":{"intent":"memory"}}
 
-    # Markov generative fallback
+    # Markov generative fallback (greedy continuation)
     gen = MARKOV.generate(seed=user, max_words=50)
     if gen:
-        return {"reply": gen.capitalize() + ".", "meta":{"intent":"gen"}}
+        if gen.strip():
+            if user and user.strip()[-1] in ".!?":
+                reply_text = gen.capitalize() + "."
+            else:
+                reply_text = (user.rstrip() + " " + gen).strip()
+            return {"reply": reply_text, "meta":{"intent":"gen"}}
 
     return {"reply": "I don't know that yet. Teach me with 'X means Y' or '/define X: Y'.", "meta":{"intent":"unknown"}}
 
@@ -598,11 +930,21 @@ with left:
             incremental_retrain(); train_markov()
             st.rerun()
     if c2.button("Complete"):
-        ui = user_input.strip()
+        ui = user_input.rstrip()
         if ui:
-            comp = MARKOV.generate(seed=ui, max_words=40) or (ui + " ...")
-            ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
-            ai_state.setdefault("conversations", []).append({"role":"assistant","text":comp,"time":datetime.now().isoformat()})
+            # improved deterministic completion: greedy next-word continuation (chooses best-fitting next word each step)
+            cont = MARKOV.generate(seed=ui, max_words=40)
+            if cont:
+                if ui and ui.strip()[-1] in ".!?":
+                    final = ui.rstrip() + " " + cont.capitalize()
+                else:
+                    final = (ui + " " + cont).strip()
+                ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
+                ai_state.setdefault("conversations", []).append({"role":"assistant","text":final,"time":datetime.now().isoformat()})
+            else:
+                gen = MARKOV.generate(max_words=40)
+                ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
+                ai_state.setdefault("conversations", []).append({"role":"assistant","text":gen,"time":datetime.now().isoformat()})
             save_json(STATE_FILE, ai_state)
             st.rerun()
     if c3.button("Teach (word: definition)"):
