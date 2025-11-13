@@ -44,11 +44,288 @@ ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings"
 # -------------------------
 # You can later upload/merge a richer dictionary.json via UI
 BASE_DICT = {
-    "george washington": {"definition":"The first President of the United States (1789–1797).","type":"proper_noun","examples":["George Washington led the Continental Army."]},
-    "abraham lincoln": {"definition":"16th U.S. President, led during the Civil War.","type":"proper_noun","examples":["Abraham Lincoln issued the Emancipation Proclamation."]},
-    "paris": {"definition":"Capital of France.","type":"proper_noun","examples":["Paris is known for the Eiffel Tower."]},
-    "python": {"definition":"High-level programming language popular for scripting and data science.","type":"noun","examples":["I used Python to write that script."]},
-    "pi": {"definition":"Mathematical constant π ≈ 3.14159.","type":"number","examples":["Pi is used to compute circle properties."]}
+    BASE_DICT = {
+    # Proper nouns / entities
+    "george washington": {
+        "definition": "The first President of the United States (1789–1797).",
+        "type": "proper_noun",
+        "examples": ["George Washington led the Continental Army.", "George Washington became the first U.S. president in 1789."]
+    },
+    "abraham lincoln": {
+        "definition": "16th President of the United States; led the nation during the Civil War.",
+        "type": "proper_noun",
+        "examples": ["Abraham Lincoln issued the Emancipation Proclamation.", "Lincoln delivered the Gettysburg Address."]
+    },
+    "paris": {
+        "definition": "Capital and largest city of France.",
+        "type": "place",
+        "examples": ["Paris is known for the Eiffel Tower.", "Many artists have lived and worked in Paris."]
+    },
+
+    # Common nouns
+    "time": {
+        "definition": "A continuous, measurable quantity in which events occur in a sequence.",
+        "type": "noun",
+        "examples": ["Time passes quickly when you are busy.", "What time is the meeting?"]
+    },
+    "person": {
+        "definition": "A human being regarded as an individual.",
+        "type": "noun",
+        "examples": ["Every person has their own story.", "She is a kind person."]
+    },
+    "year": {
+        "definition": "A period of 365 (or 366) days, used for reckoning time in calendars.",
+        "type": "noun",
+        "examples": ["The year 2024 had many changes.", "I travel once a year."]
+    },
+    "way": {
+        "definition": "A method, style, or manner of doing something.",
+        "type": "noun",
+        "examples": ["There is more than one way to solve the problem.", "She found a way to fix it."]
+    },
+    "day": {
+        "definition": "A 24-hour period; the time from one midnight to the next.",
+        "type": "noun",
+        "examples": ["Today is a sunny day.", "We work five days a week."]
+    },
+    "thing": {
+        "definition": "An object, concept, or matter that is not specifically named.",
+        "type": "noun",
+        "examples": ["That is a useful thing to know.", "Put the thing on the table."]
+    },
+    "world": {
+        "definition": "The earth, together with all of its countries and peoples.",
+        "type": "noun",
+        "examples": ["The world is full of diverse cultures.", "She traveled around the world."]
+    },
+    "life": {
+        "definition": "The existence of an individual human being or animal.",
+        "type": "noun",
+        "examples": ["Life is full of surprises.", "He leads a simple life."]
+    },
+    "idea": {
+        "definition": "A thought or suggestion as to a possible course of action.",
+        "type": "noun",
+        "examples": ["That's a good idea.", "She shared an idea during the meeting."]
+    },
+    "problem": {
+        "definition": "A matter or situation regarded as unwelcome or harmful and needing to be dealt with.",
+        "type": "noun",
+        "examples": ["We solved the problem together.", "This is a tricky problem to fix."]
+    },
+
+    # Common verbs (base forms)
+    "be": {
+        "definition": "Exist; occur; take place; have a specified quality or condition.",
+        "type": "verb",
+        "examples": ["I want to be helpful.", "There will be a meeting at noon."]
+    },
+    "have": {
+        "definition": "Possess, own, or hold.",
+        "type": "verb",
+        "examples": ["I have an idea.", "They have three children."]
+    },
+    "do": {
+        "definition": "Perform or carry out an action or task.",
+        "type": "verb",
+        "examples": ["I will do the work.", "What did you do today?"]
+    },
+    "say": {
+        "definition": "Utter words to convey information, an opinion, a feeling or intention.",
+        "type": "verb",
+        "examples": ["Please say your name.", "He didn't say much."]
+    },
+    "go": {
+        "definition": "Move from one place to another; travel.",
+        "type": "verb",
+        "examples": ["Let's go to the store.", "She goes to school by bus."]
+    },
+    "get": {
+        "definition": "Come to have or hold; receive or obtain.",
+        "type": "verb",
+        "examples": ["I need to get groceries.", "Did you get my message?"]
+    },
+    "make": {
+        "definition": "Form (something) by putting parts together or combining substances.",
+        "type": "verb",
+        "examples": ["She will make a cake.", "We make plans every week."]
+    },
+    "know": {
+        "definition": "Be aware of through observation, inquiry, or information.",
+        "type": "verb",
+        "examples": ["I know the answer.", "Do you know her?"]
+    },
+    "think": {
+        "definition": "Use one's mind actively to form connected ideas.",
+        "type": "verb",
+        "examples": ["I think this will work.", "He thinks carefully before speaking."]
+    },
+    "take": {
+        "definition": "Lay hold of (something) with one's hands; move with it.",
+        "type": "verb",
+        "examples": ["Take your umbrella.", "She will take the train."]
+    },
+    "see": {
+        "definition": "Perceive with the eyes; understand or realize.",
+        "type": "verb",
+        "examples": ["I see what you mean.", "Can you see the mountain?"]
+    },
+
+    # Adjectives
+    "good": {
+        "definition": "Having desirable or positive qualities.",
+        "type": "adjective",
+        "examples": ["She did a good job.", "That's a good idea."]
+    },
+    "new": {
+        "definition": "Not existing before; made, introduced, or discovered recently.",
+        "type": "adjective",
+        "examples": ["I bought a new book.", "This is a new experience."]
+    },
+    "first": {
+        "definition": "Coming before all others in time or order.",
+        "type": "adjective",
+        "examples": ["His first attempt succeeded.", "We visited the city for the first time."]
+    },
+    "last": {
+        "definition": "Coming after all others in time or order; final.",
+        "type": "adjective",
+        "examples": ["She finished last.", "This is the last chapter."]
+    },
+    "long": {
+        "definition": "Measuring a great distance from end to end.",
+        "type": "adjective",
+        "examples": ["It was a long journey.", "She has long hair."]
+    },
+
+    # Adverbs / connectors
+    "very": {
+        "definition": "To a high degree.",
+        "type": "adverb",
+        "examples": ["This is very important.", "She was very happy."]
+    },
+    "often": {
+        "definition": "Frequently; many times.",
+        "type": "adverb",
+        "examples": ["I often go for a walk.", "We often eat together."]
+    },
+    "always": {
+        "definition": "At all times; on every occasion.",
+        "type": "adverb",
+        "examples": ["She always arrives early.", "I will always remember you."]
+    },
+    "never": {
+        "definition": "At no time in the past or future; not ever.",
+        "type": "adverb",
+        "examples": ["I never said that.", "He never eats mushrooms."]
+    },
+    "sometimes": {
+        "definition": "Occasionally; at certain times.",
+        "type": "adverb",
+        "examples": ["Sometimes I bake bread.", "We sometimes travel in summer."]
+    },
+
+    # Prepositions / short function words
+    "in": {
+        "definition": "Expressing the situation of being enclosed or surrounded by something.",
+        "type": "preposition",
+        "examples": ["The book is in the bag.", "She lives in Paris."]
+    },
+    "on": {
+        "definition": "Physically in contact with and supported by a surface.",
+        "type": "preposition",
+        "examples": ["Put it on the table.", "The picture is on the wall."]
+    },
+    "at": {
+        "definition": "Used to indicate a point in space or time.",
+        "type": "preposition",
+        "examples": ["Meet me at noon.", "She is good at painting."]
+    },
+    "with": {
+        "definition": "Accompanied by (another person or thing).",
+        "type": "preposition",
+        "examples": ["I'll come with you.", "Serve with a side salad."]
+    },
+    "about": {
+        "definition": "On the subject of; concerning.",
+        "type": "preposition",
+        "examples": ["We talked about the project.", "A story about friendship."]
+    },
+
+    # Useful phrases / multiword entries
+    "there is": {
+        "definition": "Used to indicate the existence of something.",
+        "type": "phrase",
+        "examples": ["There is a problem we must fix.", "There is a book on the shelf."]
+    },
+    "i think": {
+        "definition": "A common phrase expressing an opinion.",
+        "type": "phrase",
+        "examples": ["I think this is fine.", "I think we should go now."]
+    },
+    "for example": {
+        "definition": "Used to introduce an illustrative example.",
+        "type": "phrase",
+        "examples": ["Many fruits, for example apples and oranges, are healthy.", "Use punctuation correctly, for example commas."]
+    },
+    "in order to": {
+        "definition": "With the purpose of; so as to.",
+        "type": "phrase",
+        "examples": ["We study in order to learn.", "He trained hard in order to win."]
+    },
+
+    # Question words
+    "who": {
+        "definition": "Asking for a person or people.",
+        "type": "question_word",
+        "examples": ["Who is at the door?", "Who wrote this letter?"]
+    },
+    "what": {
+        "definition": "Asking for information specifying something.",
+        "type": "question_word",
+        "examples": ["What time is it?", "What is your favorite color?"]
+    },
+    "when": {
+        "definition": "Asking for a time or occasion.",
+        "type": "question_word",
+        "examples": ["When will you arrive?", "When is the meeting?"]
+    },
+    "where": {
+        "definition": "Asking for a place or location.",
+        "type": "question_word",
+        "examples": ["Where do you live?", "Where is the station?"]
+    },
+    "why": {
+        "definition": "Asking for a reason or purpose.",
+        "type": "question_word",
+        "examples": ["Why are you late?", "Why does this work?"]
+    },
+
+    # A few domain-specific / helpful concepts
+    "python": {
+        "definition": "A high-level programming language popular for scripting and data science.",
+        "type": "noun",
+        "examples": ["I used Python to write that script.", "Python has clear syntax."]
+    },
+    "gravity": {
+        "definition": "The force that attracts a body toward the centre of the earth, or toward any other physical body having mass.",
+        "type": "noun",
+        "examples": ["Gravity keeps us on the ground.", "The apple fell because of gravity."]
+    },
+    "pi": {
+        "definition": "Mathematical constant π ≈ 3.14159.",
+        "type": "number",
+        "examples": ["Pi is used to compute circle properties.", "The value of pi is approximately 3.14159."]
+    },
+
+    # Misc shorter entries to increase vocabulary richness
+    "ask": {"definition":"Request information or an answer from someone.","type":"verb","examples":["Ask a friend for help.","She will ask the teacher."]},
+    "answer": {"definition":"A response to a question.","type":"noun","examples":["Give the correct answer.","His answer was surprising."]},
+    "find": {"definition":"Discover something after searching or effort.","type":"verb","examples":["I need to find my keys.", "She found a good solution."]},
+    "help": {"definition":"Make it easier for someone to do something by offering one's services or resources.","type":"verb","examples":["Can you help me?", "Thanks for your help."]},
+    "learn": {"definition":"Gain or acquire knowledge or skill in (something) by study, experience, or being taught.","type":"verb","examples":["I want to learn French.", "We learn from mistakes."]},
+    "use": {"definition":"Employ for a particular purpose.","type":"verb","examples":["Use a pencil to write.", "How do I use this tool?"]},
+    "goodbye": {"definition":"A conventional expression used at parting.","type":"interjection","examples":["Goodbye and take care.", "He said goodbye before leaving."]},
 }
 
 # merge external dictionary file if present at startup
