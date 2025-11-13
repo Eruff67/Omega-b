@@ -210,17 +210,19 @@ def build_training(vocab: List[str]) -> List[Tuple[List[float], int]]:
     return data
 
 # -------------------------
-# Markov fallback generator (improved for seed-completion)
+# Markov fallback generator (greedy next-word continuation)
 # -------------------------
 class Markov:
     def __init__(self):
-        self.map = {}
-        self.starts = []
+        # map: (w1,w2) -> { next_word: count, ... }
+        self.map: Dict[Tuple[str,str], Dict[str,int]] = {}
+        # list of starting bigrams observed
+        self.starts: List[Tuple[str,str]] = []
 
     def train(self, text: str):
         toks = tokenize(text)
-        if len(toks) < 3: return
-        # store starting bigrams
+        if len(toks) < 3:
+            return
         self.starts.append((toks[0].lower(), toks[1].lower()))
         for i in range(len(toks)-2):
             key = (toks[i].lower(), toks[i+1].lower())
@@ -228,64 +230,75 @@ class Markov:
             self.map.setdefault(key, {})
             self.map[key][nxt] = self.map[key].get(nxt, 0) + 1
 
-    def _weighted_choice(self, choices: Dict[str,int]) -> Optional[str]:
-        total = sum(choices.values())
-        if total == 0: return None
-        r = random.randint(1, total)
-        acc = 0
-        for w,cnt in choices.items():
-            acc += cnt
-            if r <= acc:
-                return w
-        return None
+    def _best_choice(self, choices: Dict[str,int]) -> Optional[str]:
+        """Return the most likely next token (argmax)."""
+        if not choices:
+            return None
+        # pick token with max count; tie-break deterministically by sorted order
+        best = max(sorted(choices.items()), key=lambda kv: kv[1])
+        return best[0]
+
+    def _best_unigram_after(self, token: str) -> Optional[str]:
+        """Backoff: look for bigrams that start with token and choose most common follower overall."""
+        candidates: Dict[str,int] = {}
+        for (a,b), nxts in self.map.items():
+            if a == token:
+                for w,cnt in nxts.items():
+                    candidates[w] = candidates.get(w,0) + cnt
+        if not candidates:
+            return None
+        return self._best_choice(candidates)
 
     def generate(self, seed: str=None, max_words:int=40) -> str:
         """
-        If seed is provided and contains at least two tokens that exist in the model,
-        generate only the continuation (new words) and return that continuation string.
-        Otherwise, produce a fresh short sentence (full text).
+        Deterministic greedy generation:
+         - If seed has >=2 tokens and we have a matching bigram, greedily pick the most likely next word
+           and repeat using the last two words each step, returning only the NEW words (continuation).
+         - Back off to a unigram-after-last-token heuristic if exact bigram missing.
+         - If no seed or nothing found, generate a full sentence starting from a random observed start.
         """
         if seed:
             toks = tokenize(seed)
             if len(toks) >= 2:
+                # start from the last two tokens of the seed (lowercased)
                 key = (toks[-2].lower(), toks[-1].lower())
-                # if we know this bigram, try to continue from it
-                if key in self.map:
-                    out = [key[0], key[1]]
-                    new_words = []
-                    for _ in range(max_words):
-                        choices = self.map.get((out[-2], out[-1]))
-                        if not choices:
-                            break
-                        nxt = self._weighted_choice(choices)
-                        if not nxt:
-                            break
-                        out.append(nxt)
-                        new_words.append(nxt)
-                        # small stop condition: if word ends with sentence-like token in original data? we don't have punctuation tokens,
-                        # so just allow up to max_words.
-                    # join new words into a continuation; do not repeat the seed tokens
-                    if new_words:
-                        cont = " ".join(new_words)
-                        # restore capitalization if seed ends with capitalized word
-                        if seed.strip() and seed.strip()[-1] not in ".!?":
-                            # if seed ends without punctuation, join with a space preserving seed punctuation/casing
-                            # ensure first letter of continuation is lowercase if seed ends mid-sentence; else match casing
-                            if seed.strip() and seed.strip()[-1].isupper():
-                                cont = cont.capitalize()
-                        return cont
-            # fallback to trying to find any start if seed doesn't help
-        # no seed or couldn't continue: generate a full-ish sentence
+                continuation: List[str] = []
+                # greedy loop
+                for _ in range(max_words):
+                    # try exact bigram
+                    if key in self.map:
+                        nxt = self._best_choice(self.map[key])
+                    else:
+                        # backoff: try best unigram after the last token
+                        nxt = self._best_unigram_after(key[1])
+                    if not nxt:
+                        break
+                    continuation.append(nxt)
+                    # shift window
+                    key = (key[1], nxt)
+                    # small safety: avoid infinite loops when model repeats the same word forever
+                    if len(continuation) >= 2 and continuation[-1] == continuation[-2]:
+                        break
+                # return only new words (don't repeat the seed)
+                if continuation:
+                    return " ".join(continuation)
+                # else fall back to trying to generate from any starting bigram below
+        # No seed or couldn't continue: generate full sentence using greedy choices from a start bigram
         if not self.starts:
             return ""
         key = random.choice(self.starts)
         out = [key[0], key[1]]
         for _ in range(max_words-2):
             choices = self.map.get((out[-2], out[-1]))
-            if not choices: break
-            nxt = self._weighted_choice(choices)
-            if not nxt: break
+            if not choices:
+                break
+            nxt = self._best_choice(choices)
+            if not nxt:
+                break
             out.append(nxt)
+            # stop if repetitive
+            if len(out) >= 3 and out[-1] == out[-2] == out[-3]:
+                break
         return " ".join(out)
 
 MARKOV = Markov()
@@ -494,18 +507,13 @@ def compose_reply(user_text: str) -> Dict[str,Any]:
     if mem:
         return {"reply": mem, "meta":{"intent":"memory"}}
 
-    # Markov generative fallback
+    # Markov generative fallback (greedy continuation)
     gen = MARKOV.generate(seed=user, max_words=50)
     if gen:
-        # If gen looks like a pure continuation (no repeated seed), join intelligently:
-        # If generate produced text starting with the last word of seed, avoid duplication.
-        # The MARKOV.generate seed-mode returns only new words (by design), so prefer to append.
         if gen.strip():
-            # if user already ends with punctuation, append with space; otherwise put a space
             if user and user.strip()[-1] in ".!?":
                 reply_text = gen.capitalize() + "."
             else:
-                # join seed + continuation
                 reply_text = (user.rstrip() + " " + gen).strip()
             return {"reply": reply_text, "meta":{"intent":"gen"}}
 
@@ -647,19 +655,16 @@ with left:
     if c2.button("Complete"):
         ui = user_input.rstrip()
         if ui:
-            # improved completion: get continuation (only new words) and append to the seed intelligently
+            # improved deterministic completion: greedy next-word continuation (chooses best-fitting next word each step)
             cont = MARKOV.generate(seed=ui, max_words=40)
             if cont:
-                # if seed already ends with punctuation, capitalize continuation and join with space
                 if ui and ui.strip()[-1] in ".!?":
                     final = ui.rstrip() + " " + cont.capitalize()
                 else:
-                    # join seed + continuation; avoid double spaces
                     final = (ui + " " + cont).strip()
                 ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
                 ai_state.setdefault("conversations", []).append({"role":"assistant","text":final,"time":datetime.now().isoformat()})
             else:
-                # fallback: generate a standalone sequence
                 gen = MARKOV.generate(max_words=40)
                 ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
                 ai_state.setdefault("conversations", []).append({"role":"assistant","text":gen,"time":datetime.now().isoformat()})
