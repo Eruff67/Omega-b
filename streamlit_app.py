@@ -861,9 +861,9 @@ left, right = st.columns([3,1])
 with right:
     st.header("Memory & Model Controls")
     if st.button("Clear Conversation"):
-        ai_state["conversations"].clear(); save_json(STATE_FILE, ai_state); st.success("Conversation cleared."); st.experimental_rerun()
+        ai_state["conversations"].clear(); save_json(STATE_FILE, ai_state); st.success("Conversation cleared."); st.rerun()
     if st.button("Forget Learned Memories"):
-        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.success("All learned memories forgotten."); st.experimental_rerun()
+        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.success("All learned memories forgotten."); st.rerun()
 
     st.markdown("---")
     st.write("Model status:")
@@ -877,7 +877,7 @@ with right:
             build_and_train_model(force=True)
             train_markov_full()
             st.success("Model rebuilt.")
-            st.experimental_rerun()
+            st.rerun()
 
     st.markdown("---")
     st.markdown("**Manage Learned**")
@@ -889,7 +889,7 @@ with right:
                 st.write(f"• **{k}** — {ai_state['learned'][k].get('definition','')[:180]}")
             with colk2:
                 if st.button(f"Delete {k}", key=f"del_{k}"):
-                    ai_state["learned"].pop(k, None); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.experimental_rerun()
+                    ai_state["learned"].pop(k, None); save_json(STATE_FILE, ai_state); ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state); st.rerun()
     else:
         st.write("_No learned items yet._")
 
@@ -913,7 +913,7 @@ with right:
             if st.button("Ingest file"):
                 msg = ingest_text_content(uploaded.name, text, save_as_memory=save_as_memory)
                 st.success(msg)
-                st.experimental_rerun()
+                st.rerun()
         except Exception as e:
             st.error(f"Failed to read uploaded file: {e}")
 
@@ -933,7 +933,7 @@ with right:
                 save_json(STATE_FILE, ai_state)
                 ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
                 st.success("Merged imported state. Model marked dirty.")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Imported file not in expected format.")
         except Exception as e:
@@ -966,7 +966,7 @@ with left:
             save_json(STATE_FILE, ai_state)
             MARKOV.train(ui); MARKOV.train(reply)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            st.experimental_rerun()
+            st.rerun()
 
     if c2.button("Complete (single)"):
         ui = user_input.rstrip()
@@ -983,7 +983,7 @@ with left:
                 MARKOV.train(ui); MARKOV.train(final)
                 save_json(STATE_FILE, ai_state)
                 ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            st.experimental_rerun()
+            st.rerun()
 
     if c3.button("Generate Paragraph"):
         ui = user_input.strip()
@@ -998,7 +998,7 @@ with left:
             MARKOV.train(para)
             save_json(STATE_FILE, ai_state)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            st.experimental_rerun()
+            st.rerun()
 
     if c4.button("Teach (word: definition)"):
         ui = user_input.strip()
@@ -1010,7 +1010,7 @@ with left:
             MARKOV.train(f"{w} {d}")
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
             st.success(f"Learned '{w}'. (Model rebuild recommended.)")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.warning("To teach: enter `word: definition` (e.g. gravity: a force that pulls)")
 
