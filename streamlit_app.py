@@ -5,16 +5,38 @@
 #   streamlit run jack_offline_fast_start.py
 
 import streamlit as st
-import json, os, re, math, random
+import json, os, re, math, random, uuid, threading
 from datetime import datetime
 from typing import List, Dict, Tuple, Any, Optional
 
 # -------------------------
-# Files & Persistence
+# Device-specific isolation (per-device conversations + privacy)
 # -------------------------
-STATE_FILE = "ai_state.json"
-DICT_FILE = "dictionary.json"       # persisted large dict (generated once on demand)
-MARKOV_FILE = "markov_state.json"
+DEVICE_ID_FILE = ".jack_device_id"
+
+def get_or_create_device_id():
+    if os.path.exists(DEVICE_ID_FILE):
+        try:
+            with open(DEVICE_ID_FILE, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception:
+            pass
+    new_id = str(uuid.uuid4())[:8]  # short unique id per device
+    try:
+        with open(DEVICE_ID_FILE, "w", encoding="utf-8") as f:
+            f.write(new_id)
+    except Exception:
+        pass
+    return new_id
+
+DEVICE_ID = get_or_create_device_id()
+
+# -------------------------
+# Files & Persistence (device-scoped)
+# -------------------------
+STATE_FILE = f"ai_state_{DEVICE_ID}.json"
+DICT_FILE = f"dictionary_{DEVICE_ID}.json"       # persisted large dict (generated once on demand)
+MARKOV_FILE = f"markov_state_{DEVICE_ID}.json"
 
 def load_json(path: str, default):
     try:
@@ -33,7 +55,28 @@ def save_json(path: str, data):
         print("Failed saving", path, e)
 
 # persistent small state (convos, learned, flags)
-ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings": {}, "model_dirty": True})
+ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings": {"persona":"neutral"}, "model_dirty": True})
+
+# -------------------------
+# sklearn (TF-IDF semantic) - install if missing
+# -------------------------
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+except Exception:
+    try:
+        os.system("pip install scikit-learn")
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+    except Exception:
+        TfidfVectorizer = None
+        cosine_similarity = None
+
+# global semantic objects
+_vectorizer = None
+_matrix = None
+_indexed_keys = []
+_vector_lock = threading.Lock()
 
 # -------------------------
 # Light-weight tokenizer (keeps punctuation separate)
@@ -56,11 +99,7 @@ MINI_BASE_DICT = {
     "eat": {"definition":"to consume food","type":"verb","examples":["i eat breakfast.","eat slowly."]},
     "drink": {"definition":"to consume liquid","type":"verb","examples":["drink water.","he drinks coffee."]},
     "food": {"definition":"substances eaten for nutrition","type":"noun","examples":["food is necessary.","fresh food tastes good."]},
-    "i": {"definition":"First-person pronoun.","type":"pronoun","examples":["i went home.","i think that's correct."]},
-    "you": {"definition":"Second-person pronoun.","type":"pronoun","examples":["you are kind.","can you help me?"]},
     "we": {"definition":"First-person plural pronoun.","type":"pronoun","examples":["we agree.","we will go tomorrow."]},
-    "the": {"definition":"Definite article.","type":"article","examples":["the book is on the table.","the sky is blue."]},
-    "a": {"definition":"Indefinite article.","type":"article","examples":["a dog barked.","a good idea."]},
     "be": {"definition":"Exist, occur, or have a specified quality.","type":"verb","examples":["i want to be helpful.","there will be a meeting."]},
     "have": {"definition":"Possess or own.","type":"verb","examples":["i have a plan.","they have several options."]},
     "do": {"definition":"Perform an action.","type":"verb","examples":["do your best.","what did you do?"]},
@@ -411,6 +450,60 @@ def build_and_train_model(force: bool=False):
     save_json(STATE_FILE, ai_state)
 
 # -------------------------
+# Semantic helpers (sklearn TF-IDF + cosine)
+# -------------------------
+def rebuild_semantic_index(force: bool=False):
+    """Build TF-IDF matrix over dictionary + learned definitions (thread-safe)."""
+    global _vectorizer, _matrix, _indexed_keys
+    if TfidfVectorizer is None:
+        return
+    with _vector_lock:
+        md = merged_dictionary()
+        corpus = []
+        keys = []
+        for k, v in md.items():
+            corpus.append(f"{k} {v.get('definition','')} {' '.join(v.get('examples',[]))}")
+            keys.append(k)
+        try:
+            _vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
+            _matrix = _vectorizer.fit_transform(corpus)
+            _indexed_keys = keys
+            # mark model as up-to-date
+            ai_state["model_dirty"] = False
+            save_json(STATE_FILE, ai_state)
+        except Exception as e:
+            print("Failed to build semantic index:", e)
+
+def find_similar_terms(query: str, topn: int = 6):
+    """Find similar words or definitions to a query using cosine similarity."""
+    global _vectorizer, _matrix, _indexed_keys
+    if TfidfVectorizer is None:
+        return []
+    with _vector_lock:
+        if _vectorizer is None or _matrix is None:
+            rebuild_semantic_index()
+        try:
+            vec = _vectorizer.transform([query])
+            sims = cosine_similarity(vec, _matrix)[0]
+            top_idx = sims.argsort()[::-1][:topn]
+            return [( _indexed_keys[i], float(sims[i]) ) for i in top_idx if sims[i] > 0.08]
+        except Exception:
+            return []
+
+def semantic_answer(query: str) -> Optional[str]:
+    results = find_similar_terms(query)
+    if not results:
+        return None
+    best_key, score = results[0]
+    defs = merged_dictionary()
+    if best_key in defs:
+        entry = defs[best_key]
+        ex = entry.get("examples", [])
+        ex_text = (" Examples: " + " | ".join(ex)) if ex else ""
+        return f"{best_key.capitalize()} ({entry.get('type','')}): {entry.get('definition','')}{ex_text} (score {score:.2f})"
+    return None
+
+# -------------------------
 # Utilities (definitions/learn)
 # -------------------------
 LEARN_PATTERNS = [
@@ -464,8 +557,34 @@ def lookup_kb(query: str) -> Tuple[Optional[str], float]:
     return None, 0.0
 
 # -------------------------
-# Compose reply
+# Persona system (clean, colorful)
 # -------------------------
+def apply_persona(text: str, persona: str) -> str:
+    persona = (persona or "neutral").lower()
+    if persona == "cowboy":
+        # informal, friendly, a bit folksy
+        if not text.endswith((".", "!", "?")):
+            text = text + "."
+        return f"Howdy — {text} Y'all take care now."
+    if persona == "pirate":
+        return f"Avast! {text} Arr!"
+    if persona == "scientist":
+        return f"As a scientist, here's a concise view: {text}"
+    if persona == "formal":
+        return f"{text} Please let me know if you require further clarification."
+    if persona == "casual":
+        return f"{text} — cool?"
+    # neutral or unknown
+    return text
+
+# -------------------------
+# Compose reply (central respond helper)
+# -------------------------
+def respond(reply_text: str, meta: Dict[str,Any]) -> Dict[str,Any]:
+    persona = ai_state.get("settings", {}).get("persona", "neutral")
+    reply_text = apply_persona(reply_text, persona)
+    return {"reply": reply_text, "meta": meta}
+
 def safe_eval_math(expr: str):
     try:
         filtered = re.sub(r"[^0-9\.\+\-\*\/\%\(\)\s\^]", "", expr)
@@ -486,9 +605,12 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
     lower = user.lower()
     # command handlers
     if lower in ("/clear", "clear chat"):
-        ai_state["conversations"].clear(); save_json(STATE_FILE, ai_state); return {"reply":"Chat cleared.","meta":{"intent":"memory"}}
+        ai_state["conversations"].clear(); save_json(STATE_FILE, ai_state); return respond("Chat cleared.", {"intent":"memory"})
     if lower in ("/forget", "forget"):
-        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); ai_state["model_dirty"]=True; save_json(STATE_FILE, ai_state); return {"reply":"Learned memory cleared.","meta":{"intent":"memory"}}
+        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); ai_state["model_dirty"]=True; save_json(STATE_FILE, ai_state)
+        # trigger semantic rebuild in background
+        threading.Thread(target=rebuild_semantic_index).start()
+        return respond("Learned memory cleared.", {"intent":"memory"})
     if lower.startswith("/delete "):
         arg = lower[len("/delete "):].strip()
         if arg.isdigit():
@@ -496,24 +618,36 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
             if 0 <= idx < len(ai_state.get("conversations", [])):
                 removed = ai_state["conversations"].pop(idx)
                 save_json(STATE_FILE, ai_state)
-                return {"reply": f"Deleted conversation #{idx+1}: {removed.get('text')}", "meta":{"intent":"memory"}}
+                return respond(f"Deleted conversation #{idx+1}: {removed.get('text')}", {"intent":"memory"})
             else:
-                return {"reply":"Invalid conversation index.","meta":{"intent":"error"}}
+                return respond("Invalid conversation index.", {"intent":"error"})
         else:
             key = normalize_key(arg)
             if key in ai_state.get("learned", {}):
-                ai_state["learned"].pop(key); save_json(STATE_FILE, ai_state); ai_state["model_dirty"]=True; save_json(STATE_FILE, ai_state); return {"reply": f"Removed learned definition for '{key}'.", "meta":{"intent":"memory"}}
+                ai_state["learned"].pop(key); save_json(STATE_FILE, ai_state); ai_state["model_dirty"]=True; save_json(STATE_FILE, ai_state)
+                threading.Thread(target=rebuild_semantic_index).start()
+                return respond(f"Removed learned definition for '{key}'.", {"intent":"memory"})
             else:
-                return {"reply": f"No learned definition for '{key}'.", "meta":{"intent":"error"}}
+                return respond(f"No learned definition for '{key}'.", {"intent":"error"})
+    # persona command
+    if lower.startswith("/persona ") or lower.startswith("persona "):
+        parts = user.split(None,1)
+        if len(parts) > 1:
+            p = parts[1].strip().lower()
+            ai_state.setdefault("settings", {})["persona"] = p
+            save_json(STATE_FILE, ai_state)
+            return respond(f"Persona set to '{p}'.", {"intent":"persona"})
+        else:
+            return respond(f"Current persona: {ai_state.get('settings',{}).get('persona','neutral')}", {"intent":"persona"})
     # math
     math_res = safe_eval_math(user)
     if math_res is not None:
-        return {"reply": f"Math result: {math_res}", "meta":{"intent":"math"}}
+        return respond(f"Math result: {math_res}", {"intent":"math"})
     # time/date
     if re.search(r"\bwhat(?:'s| is)? the time\b|\btime now\b|\bcurrent time\b", lower):
-        return {"reply": f"The current time is {datetime.now().strftime('%H:%M:%S')}", "meta":{"intent":"time"}}
+        return respond(f"The current time is {datetime.now().strftime('%H:%M:%S')}", {"intent":"time"})
     if re.search(r"\bwhat(?:'s| is)? the date\b|\bcurrent date\b|\bdate today\b", lower):
-        return {"reply": f"Today's date is {datetime.now().strftime('%Y-%m-%d')}", "meta":{"intent":"date"}}
+        return respond(f"Today's date is {datetime.now().strftime('%Y-%m-%d')}", {"intent":"date"})
     # define command
     if lower.startswith("/define ") or lower.startswith("define "):
         rest = user.split(None,1)[1] if len(user.split(None,1))>1 else ""
@@ -523,36 +657,43 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
             ai_state.setdefault("learned", {})[w] = {"definition": d, "type":"learned", "examples": []}
             save_json(STATE_FILE, ai_state)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-            return {"reply": f"Learned definition for '{w}'.", "meta":{"intent":"learning"}}
+            # rebuild semantic index in background
+            threading.Thread(target=rebuild_semantic_index).start()
+            return respond(f"Learned definition for '{w}'.", {"intent":"learning"})
         m2 = re.match(r'\s*([A-Za-z\'\- ]+)\s*$', rest)
         if m2:
             key = normalize_key(m2.group(1))
             defs = merged_dictionary()
             if key in defs:
-                return {"reply": format_definition(key, defs[key]), "meta":{"intent":"definition"}}
+                return respond(format_definition(key, defs[key]), {"intent":"definition"})
             else:
-                return {"reply": f"No definition for '{key}'. Use '/define {key}: <meaning>' to teach me.", "meta":{"intent":"definition"}}
-        return {"reply":"Usage: /define word: definition", "meta":{"intent":"define"}}
+                return respond(f"No definition for '{key}'. Use '/define {key}: <meaning>' to teach me.", {"intent":"definition"})
+        return respond("Usage: /define word: definition", {"intent":"define"})
     # natural teach patterns
     w,d = try_extract_definition(user)
     if w and d:
         ai_state.setdefault("learned", {})[w] = {"definition": d, "type":"learned", "examples": []}
         save_json(STATE_FILE, ai_state)
         ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
-        return {"reply": f"Saved learned definition: '{w}' = {d}", "meta":{"intent":"learning"}}
+        threading.Thread(target=rebuild_semantic_index).start()
+        return respond(f"Saved learned definition: '{w}' = {d}", {"intent":"learning"})
     # quick KB lookup
     ans, conf = lookup_kb(user)
     if ans:
-        return {"reply": str(ans), "meta":{"intent":"fact","confidence":conf}}
+        return respond(str(ans), {"intent":"fact","confidence":conf})
     # retrieval
     mem = retrieve_from_memory_or_learned(user)
     if mem:
-        return {"reply": mem, "meta":{"intent":"memory"}}
+        return respond(mem, {"intent":"memory"})
+    # semantic dictionary search (sklearn powered)
+    sem = semantic_answer(user)
+    if sem:
+        return respond(sem, {"intent":"semantic"})
     # paragraph generation if requested
     if paragraph_sentences and paragraph_sentences > 0:
         para = MARKOV.generate_paragraph(seed=(user if user else None), topic=topic, num_sentences=paragraph_sentences)
         if para:
-            return {"reply": para, "meta":{"intent":"gen_paragraph"}}
+            return respond(para, {"intent":"gen_paragraph"})
     # markov single generation
     gen = MARKOV.generate(seed=user)
     if gen:
@@ -560,8 +701,8 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
             reply_text = gen
         else:
             reply_text = (user.rstrip() + " " + gen).strip()
-        return {"reply": reply_text, "meta":{"intent":"gen"}}
-    return {"reply": "I don't know that yet. Teach me with 'X means Y' or '/define X: Y'.", "meta":{"intent":"unknown"}}
+        return respond(reply_text, {"intent":"gen"})
+    return respond("I don't know that yet. Teach me with 'X means Y' or '/define X: Y'.", {"intent":"unknown"})
 
 # -------------------------
 # Dictionary generation (expensive) — run only when user asks
@@ -666,8 +807,9 @@ with right:
                 save_json(DICT_FILE, big)
                 BASE_DICT.update({k:v for k,v in big.items()})
                 st.success(f"Generated and saved dictionary.json with {len(big)} entries.")
-        # Mark model dirty to reflect new vocab
+        # Mark model dirty to reflect new vocab and rebuild semantic index in background
         ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
+        threading.Thread(target=rebuild_semantic_index).start()
 
     st.markdown("---")
     st.write("Model status:")
@@ -680,6 +822,12 @@ with right:
         with st.spinner("Rebuilding (fast) — this should be quick..."):
             build_and_train_model(force=True)
             st.success("Rebuild complete — model_dirty cleared.")
+            st.rerun()
+
+    if st.button("Rebuild Semantic Model (TF-IDF)"):
+        with st.spinner("Rebuilding semantic TF-IDF index..."):
+            rebuild_semantic_index(force=True)
+            st.success("Semantic model rebuilt.")
             st.rerun()
 
     st.markdown("---")
@@ -713,6 +861,8 @@ with left:
             # light on-the-fly training: add the user+reply to markov to improve future generations
             MARKOV.train(ui); MARKOV.train(reply)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
+            # trigger semantic rebuild asynchronously (keeps UI responsive)
+            threading.Thread(target=rebuild_semantic_index).start()
             st.rerun()
 
     if c2.button("Generate Paragraph"):
@@ -725,6 +875,7 @@ with left:
             save_json(STATE_FILE, ai_state)
             MARKOV.train(para)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
+            threading.Thread(target=rebuild_semantic_index).start()
             st.rerun()
 
     if c3.button("Teach (word: definition)"):
@@ -735,6 +886,7 @@ with left:
             ai_state.setdefault("learned", {})[w] = {"definition": d, "type":"learned", "examples": []}
             save_json(STATE_FILE, ai_state)
             ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
+            threading.Thread(target=rebuild_semantic_index).start()
             st.success(f"Learned '{w}'.")
             st.rerun()
         else:
@@ -745,6 +897,8 @@ st.markdown("**Examples / Commands**")
 st.markdown("""
 - Ask a fact: `Who was the first president of the U.S.?`  
 - Teach: `gravity means a force that pulls` or `/define gravity: a force that pulls`  
+- Persona: `/persona cowboy` or `/persona scientist`  
 - Paragraph: type a seed (optional) and a Topic, then click **Generate Paragraph**  
 - Commands: `/clear` (clear conversation), `/forget` (clear learned memories), `/delete N` (delete convo #N)
 """)
+st.caption(f"Device session id: {DEVICE_ID} (this device's conversations are private).")
