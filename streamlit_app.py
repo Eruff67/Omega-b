@@ -713,14 +713,14 @@ with right:
         ai_state["conversations"].clear()
         save_json(STATE_FILE, ai_state)
         st.success("Conversation cleared.")
-        st.experimental_rerun()
+        st.rerun()
     if st.button("Forget Learned Memories"):
         ai_state["learned"].clear()
         save_json(STATE_FILE, ai_state)
         ai_state["model_dirty"] = True
         save_json(STATE_FILE, ai_state)
         st.success("All learned memories forgotten.")
-        st.experimental_rerun()
+        st.rerun()
 
     st.markdown("---")
     st.write("Model status:")
@@ -734,7 +734,7 @@ with right:
             build_and_train_model(force=True)
             train_markov_full()
             st.success("Model rebuilt.")
-            st.experimental_rerun()
+            st.rerun()
 
     st.markdown("---")
     st.markdown("**Manage Learned**")
@@ -750,7 +750,7 @@ with right:
                     save_json(STATE_FILE, ai_state)
                     ai_state["model_dirty"] = True
                     save_json(STATE_FILE, ai_state)
-                    st.experimental_rerun()
+                    st.rerun()
     else:
         st.write("_No learned items yet._")
 
@@ -774,7 +774,7 @@ with right:
             if st.button("Ingest file"):
                 msg = ingest_text_content(uploaded.name, text, save_as_memory=save_as_memory)
                 st.success(msg)
-                st.experimental_rerun()
+                st.rerun()
         except Exception as e:
             st.error(f"Failed to read uploaded file: {e}")
 
@@ -795,7 +795,7 @@ with right:
                 ai_state["model_dirty"] = True
                 save_json(STATE_FILE, ai_state)
                 st.success("Merged imported state. Model marked dirty.")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Imported file not in expected format.")
         except Exception as e:
@@ -826,7 +826,7 @@ with left:
             MARKOV.train(ui); MARKOV.train(reply)
             ai_state["model_dirty"] = True
             save_json(STATE_FILE, ai_state)
-            st.experimental_rerun()
+            st.rerun()
     if c2.button("Complete"):
         ui = user_input.rstrip()
         if ui:
@@ -847,7 +847,7 @@ with left:
                 ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
                 ai_state.setdefault("conversations", []).append({"role":"assistant","text":gen,"time":datetime.now().isoformat()})
                 save_json(STATE_FILE, ai_state)
-            st.experimental_rerun()
+            st.rerun()
     if c3.button("Teach (word: definition)"):
         ui = user_input.strip()
         m = re.match(r'\s*([^\:]+)\s*[:\-]\s*(.+)', ui)
@@ -859,7 +859,7 @@ with left:
             ai_state["model_dirty"] = True
             save_json(STATE_FILE, ai_state)
             st.success(f"Learned '{w}'. (Model rebuild recommended.)")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.warning("To teach: enter `word: definition` (e.g. gravity: a force that pulls)")
 
