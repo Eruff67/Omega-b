@@ -861,8 +861,8 @@ def ingest_text_content(name: str, text: str, save_as_memory: bool=True):
 # -------------------------
 # UI: Streamlit
 # -------------------------
-st.set_page_config(page_title="Jack — Offline AI (Persistent Memory)", layout="wide")
-st.title("Jack — Offline AI (Persistent Memory) — With 500-sentence Corpus")
+st.set_page_config(page_title="Omega-B (NOT MORALLY TRAINED YET)", layout="wide")
+st.title("Omega-B (V2.2)")
 
 left, right = st.columns([3,1])
 
