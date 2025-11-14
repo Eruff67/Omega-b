@@ -1183,6 +1183,20 @@ def fetch_and_train_markov(topic: str, limit: int = 5):
     except Exception as e:
         return f"⚠️ Error during fetch_and_train_markov: {e}"
 
+def load_markov_if_exists():
+    ser = load_json(MARKOV_FILE, None)
+    if ser and isinstance(ser, dict) and "map" in ser:
+        # deserialize
+        starts = ser.get("starts", [])
+        m = {}
+        for k,v in ser.get("map", {}).items():
+            a,b = k.split("||")
+            m[(a,b)] = v
+        MARKOV.starts = starts
+        MARKOV.map = m
+        return True
+    return False
+
 
 # try load persisted markov (fast path) — if available we avoid rebuilding
 _markov_loaded = load_markov_if_exists()
