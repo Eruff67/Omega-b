@@ -9,6 +9,9 @@ import json, os, re, math, random, uuid, threading
 from datetime import datetime
 from typing import List, Dict, Tuple, Any, Optional
 
+# Cache of already-fetched topics to avoid re-downloading repeatedly
+_fetched_topics_cache = set()
+
 # -------------------------
 # Device-specific isolation (per-device conversations + privacy)
 # -------------------------
@@ -1120,52 +1123,54 @@ def fetch_and_train_markov(topic: str, limit: int = 5):
     Retrieve text snippets about a topic from the web and train the Markov model.
     Uses Wikipedia as the data source and sklearn for sentence ranking.
 
-    - topic: what to search for (e.g. 'cats', 'gravity', 'black holes')
-    - limit: how many top sentences to use
+    Auto-skips topics already fetched (cached in _fetched_topics_cache).
     """
     try:
+        global _fetched_topics_cache
+        topic = topic.strip().lower()
+        if not topic:
+            return "⚠️ Empty topic provided."
+        if topic in _fetched_topics_cache:
+            return f"(cached) Markov already trained on '{topic}'."
+
         if TfidfVectorizer is None:
             return "❌ scikit-learn not available. Install it with 'pip install scikit-learn'."
 
-        # Retrieve content from Wikipedia
+        # Wikipedia fetch with browser headers
         url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
         headers = {
             "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0 Safari/537.36"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0 Safari/537.36"
             )
         }
         r = requests.get(url, headers=headers, timeout=10)
-
         if r.status_code != 200:
             return f"⚠️ Couldn't retrieve content for '{topic}' (HTTP {r.status_code})."
 
-        # Extract visible text from paragraphs
+        # Extract visible text
         soup = BeautifulSoup(r.text, "html.parser")
         paragraphs = [p.get_text() for p in soup.find_all("p")]
         text = " ".join(paragraphs)
         text = re.sub(r"\s+", " ", text).strip()
 
-        # Split into sentences
         sentences = re.split(r"(?<=[.!?])\s+", text)
         if not sentences or len(sentences) < 3:
             return f"No usable text found for '{topic}'."
 
-        # TF-IDF rank by information density
         vect = TfidfVectorizer(stop_words="english", max_features=5000)
         X = vect.fit_transform(sentences)
         scores = X.sum(axis=1).A.flatten()
         top_indices = scores.argsort()[::-1][:limit]
         top_sentences = [sentences[i] for i in top_indices if len(sentences[i].split()) > 4]
 
-        # Train Markov on the extracted sentences
-        count = 0
         for s in top_sentences:
             MARKOV.train(s)
-            count += 1
 
-        # Save Markov state (optional)
+        # Remember we’ve seen this topic
+        _fetched_topics_cache.add(topic)
+
         try:
             ser = {"starts": MARKOV.starts,
                    "map": {f"{a}||{b}": nxts for (a,b), nxts in MARKOV.map.items()}}
@@ -1173,25 +1178,11 @@ def fetch_and_train_markov(topic: str, limit: int = 5):
         except Exception:
             pass
 
-        return f"✅ Markov trained with {count} sentences about '{topic}'."
+        return f"✅ Markov trained with {len(top_sentences)} sentences about '{topic}'."
 
     except Exception as e:
         return f"⚠️ Error during fetch_and_train_markov: {e}"
 
-
-def load_markov_if_exists():
-    ser = load_json(MARKOV_FILE, None)
-    if ser and isinstance(ser, dict) and "map" in ser:
-        # deserialize
-        starts = ser.get("starts", [])
-        m = {}
-        for k,v in ser.get("map", {}).items():
-            a,b = k.split("||")
-            m[(a,b)] = v
-        MARKOV.starts = starts
-        MARKOV.map = m
-        return True
-    return False
 
 # try load persisted markov (fast path) — if available we avoid rebuilding
 _markov_loaded = load_markov_if_exists()
@@ -1725,12 +1716,22 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
             return respond(para, {"intent":"gen_paragraph"})
     # markov single generation
     gen = MARKOV.generate(seed=user)
+    if not gen or len(gen.split()) < 4:
+        # Auto-fetch: if generation failed or seems too short, try web training
+        topic_guess = re.sub(r"[^a-zA-Z0-9\s]", "", user).strip().split()
+        if topic_guess:
+            topic_guess = topic_guess[-1]  # use last word as rough topic
+            fetch_result = fetch_and_train_markov(topic_guess, limit=8)
+            print("[auto-fetch]", fetch_result)
+            gen = MARKOV.generate(seed=user, max_words=50)
+
     if gen:
         if re.search(r"[\.!\?]\s*$", user):
             reply_text = gen
-        else:
-            reply_text = (user.rstrip() + " " + gen).strip()
-        return respond(reply_text, {"intent":"gen"})
+    else:
+        reply_text = (user.rstrip() + " " + gen).strip()
+    return respond(reply_text, {"intent":"gen"})
+
     return respond("I don't know that yet. Teach me with 'X means Y' or '/define X: Y'.", {"intent":"unknown"})
 
 # -------------------------
