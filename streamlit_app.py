@@ -1129,7 +1129,15 @@ def fetch_and_train_markov(topic: str, limit: int = 5):
 
         # Retrieve content from Wikipedia
         url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
-        r = requests.get(url, timeout=10)
+        headers = {
+            "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0 Safari/537.36"
+            )
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+
         if r.status_code != 200:
             return f"⚠️ Couldn't retrieve content for '{topic}' (HTTP {r.status_code})."
 
