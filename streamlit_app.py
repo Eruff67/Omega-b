@@ -1,31 +1,75 @@
-# omega_b_ephemeral_mode.py
-# Ephemeral-mode version: heavy assets kept in memory and remade when reset.
+# jack_offline_fast_start.py
+# Faster startup: lazy-load big dictionary and on-demand model rebuild.
 # Run:
-#   pip install streamlit scikit-learn
-#   streamlit run omega_b_ephemeral_mode.py
+#   pip install streamlit
+#   streamlit run jack_offline_fast_start.py
 
 import streamlit as st
-import json, os, re, math, random, uuid, threading, hashlib, time
+import json, os, re, math, random, uuid, threading
 from datetime import datetime
 from typing import List, Dict, Tuple, Any, Optional
 
 # -------------------------
-# EPHEMERAL MODE CONFIG
+# Device-specific isolation (per-device conversations + privacy)
 # -------------------------
-# If True -> do NOT write large files to disk; everything rebuilt in memory on reset/restart.
-# If False -> legacy behavior: save/load device-scoped files.
-EPHEMERAL_MODE = True
+DEVICE_ID_FILE = ".jack_device_id"
+
+def get_or_create_device_id():
+    if os.path.exists(DEVICE_ID_FILE):
+        try:
+            with open(DEVICE_ID_FILE, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception:
+            pass
+    new_id = str(uuid.uuid4())[:8]  # short unique id per device
+    try:
+        with open(DEVICE_ID_FILE, "w", encoding="utf-8") as f:
+            f.write(new_id)
+    except Exception:
+        pass
+    return new_id
+
+DEVICE_ID = get_or_create_device_id()
 
 # -------------------------
-# Small helpers for ephemeral in-memory storage (when EPHEMERAL_MODE=True)
+# Files & Persistence (device-scoped)
 # -------------------------
-def _ephemeral_store():
-    """Return a dict used as in-memory 'filesystem' for ephemeral mode."""
-    return st.session_state.setdefault("_ephemeral_store", {})
+# ======================================================
+# Device- and session-specific isolation layer
+# ======================================================
+import uuid, hashlib
+
+DEVICE_ID_FILE = ".jack_device_id"
+
+def get_or_create_device_id():
+    """Create or read a unique local ID so every device/session is isolated."""
+    try:
+        # Try saving a small file on disk for this device
+        if os.path.exists(DEVICE_ID_FILE):
+            with open(DEVICE_ID_FILE, "r") as f:
+                return f.read().strip()
+        new_id = str(uuid.uuid4())[:8]
+        with open(DEVICE_ID_FILE, "w") as f:
+            f.write(new_id)
+        return new_id
+    except Exception:
+        # Fallback for read-only or cloud environments: use Streamlit session hash
+        sid = st.session_state.get("_sid")
+        if not sid:
+            sid = hashlib.sha1(str(uuid.uuid4()).encode()).hexdigest()[:8]
+            st.session_state["_sid"] = sid
+        return sid
+
+DEVICE_ID = get_or_create_device_id()
+
+# Use per-device JSON files so data never overlaps
+STATE_FILE = f"ai_state_{DEVICE_ID}.json"
+DICT_FILE = f"dictionary_{DEVICE_ID}.json"
+MARKOV_FILE = f"markov_state_{DEVICE_ID}.json"
+
+print(f"[Jack.AI] Private session active — device ID: {DEVICE_ID}")
 
 def load_json(path: str, default):
-    if EPHEMERAL_MODE:
-        return _ephemeral_store().get(path, default)
     try:
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
@@ -35,76 +79,17 @@ def load_json(path: str, default):
     return default
 
 def save_json(path: str, data):
-    if EPHEMERAL_MODE:
-        _ephemeral_store()[path] = data
-        return
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print("Failed saving", path, e)
 
-def remove_json(path: str):
-    if EPHEMERAL_MODE:
-        _ephemeral_store().pop(path, None)
-    else:
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-        except Exception:
-            pass
+# persistent small state (convos, learned, flags)
+ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings": {"persona":"neutral"}, "model_dirty": True})
 
 # -------------------------
-# Device-specific isolation (per-device conversations + privacy)
-# -------------------------
-DEVICE_ID_FILE = ".jack_device_id"
-
-def get_or_create_device_id():
-    try:
-        if not EPHEMERAL_MODE and os.path.exists(DEVICE_ID_FILE):
-            with open(DEVICE_ID_FILE, "r", encoding="utf-8") as f:
-                return f.read().strip()
-        new_id = str(uuid.uuid4())[:8]
-        if not EPHEMERAL_MODE:
-            try:
-                with open(DEVICE_ID_FILE, "w", encoding="utf-8") as f:
-                    f.write(new_id)
-            except Exception:
-                pass
-        return new_id
-    except Exception:
-        sid = st.session_state.get("_sid")
-        if not sid:
-            sid = hashlib.sha1(str(uuid.uuid4()).encode()).hexdigest()[:8]
-            st.session_state["_sid"] = sid
-        return sid
-
-DEVICE_ID = get_or_create_device_id()
-
-# filenames (only used when EPHEMERAL_MODE=False)
-STATE_FILE = f"ai_state_{DEVICE_ID}.json"
-DICT_FILE = f"dictionary_{DEVICE_ID}.json"
-MARKOV_FILE = f"markov_state_{DEVICE_ID}.json"
-KB_FILE = f"kb_massive_{DEVICE_ID}.json"
-COUNTRIES_FILE = f"countries_capitals_{DEVICE_ID}.json"
-
-print(f"[Omega-B] Ephemeral mode = {EPHEMERAL_MODE} — device ID: {DEVICE_ID}")
-
-# persistent small state: if ephemeral, keep in session_state; otherwise load from disk
-if EPHEMERAL_MODE:
-    ai_state = st.session_state.setdefault("ai_state", {"conversations": [], "learned": {}, "settings": {"persona":"neutral"}, "model_dirty": True})
-else:
-    ai_state = load_json(STATE_FILE, {"conversations": [], "learned": {}, "settings": {"persona":"neutral"}, "model_dirty": True})
-
-# When saving ai_state, obey EPHEMERAL_MODE semantics (in-memory vs file)
-def save_state():
-    if EPHEMERAL_MODE:
-        st.session_state["ai_state"] = ai_state
-    else:
-        save_json(STATE_FILE, ai_state)
-
-# -------------------------
-# sklearn (TF-IDF semantic)
+# sklearn (TF-IDF semantic) - install if missing
 # -------------------------
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -118,13 +103,14 @@ except Exception:
         TfidfVectorizer = None
         cosine_similarity = None
 
+# global semantic objects
 _vectorizer = None
 _matrix = None
 _indexed_keys = []
 _vector_lock = threading.Lock()
 
 # -------------------------
-# Tokenizer
+# Light-weight tokenizer (keeps punctuation separate)
 # -------------------------
 WORD_RE = re.compile(r"[A-Za-z']+|[.,!?:;]")
 
@@ -132,25 +118,97 @@ def tokenize(text: str) -> List[str]:
     return WORD_RE.findall((text or "").lower())
 
 # -------------------------
-# Mini dictionary (startup)
+# Minimal base dictionary loaded at startup (keeps app light)
 # -------------------------
 MINI_BASE_DICT = {
     "i": {"definition":"first-person pronoun","type":"pronoun","examples":["i went home.","i think that's correct."]},
     "you": {"definition":"second-person pronoun","type":"pronoun","examples":["you are kind.","can you help me?"]},
     "the": {"definition":"definite article","type":"article","examples":["the book is on the table.","the sky is blue."]},
     "a": {"definition":"indefinite article","type":"article","examples":["a dog barked.","a good idea."]},
+    "and": {"definition":"conjunction","type":"conj","examples":["bread and butter.","he and she."]},
+    # small curated set to keep startup fast
+    "eat": {"definition":"to consume food","type":"verb","examples":["i eat breakfast.","eat slowly."]},
+    "drink": {"definition":"to consume liquid","type":"verb","examples":["drink water.","he drinks coffee."]},
+    "food": {"definition":"substances eaten for nutrition","type":"noun","examples":["food is necessary.","fresh food tastes good."]},
+    "we": {"definition":"First-person plural pronoun.","type":"pronoun","examples":["we agree.","we will go tomorrow."]},
+    "be": {"definition":"Exist, occur, or have a specified quality.","type":"verb","examples":["i want to be helpful.","there will be a meeting."]},
+    "have": {"definition":"Possess or own.","type":"verb","examples":["i have a plan.","they have several options."]},
+    "do": {"definition":"Perform an action.","type":"verb","examples":["do your best.","what did you do?"]},
+    "say": {"definition":"Utter words.","type":"verb","examples":["please say it clearly.","they say it's fine."]},
+    "go": {"definition":"Move from one place to another.","type":"verb","examples":["let's go now.","she goes to work."]},
+    "get": {"definition":"Obtain, receive.","type":"verb","examples":["get some rest.","i got your message."]},
+    "make": {"definition":"Create or form.","type":"verb","examples":["make a list.","we make progress."]},
+    "know": {"definition":"Have knowledge or information.","type":"verb","examples":["i know the answer.","do you know him?"]},
+    "think": {"definition":"Use reasoning or intuition.","type":"verb","examples":["i think it's right.","she thinks often."]},
+    "time": {"definition":"A continuous quantity in which events occur.","type":"noun","examples":["time flies.","what time is it?"]},
+    "day": {"definition":"A 24-hour period.","type":"noun","examples":["today is a good day.","we worked all day."]},
+    "world": {"definition":"The earth and its inhabitants.","type":"noun","examples":["the world is changing.","she traveled the world."]},
+    "life": {"definition":"Existence of living beings.","type":"noun","examples":["life is precious.","he enjoys his life."]},
+    "idea": {"definition":"A thought or suggestion for possible action.","type":"noun","examples":["that's a good idea.","she shared an idea."]},
+    "problem": {"definition":"A matter needing solution.","type":"noun","examples":["we solved the problem.","this is a tricky problem."]},
+    "good": {"definition":"Having positive qualities.","type":"adj","examples":["a good idea.","she is good at it."]},
+    "new": {"definition":"Not existing before.","type":"adj","examples":["a new book.","this is new."]},
+    "first": {"definition":"Coming before others.","type":"adj","examples":["the first step.","he was first in line."]},
+    "other": {"definition":"Different or distinct from the one mentioned.","type":"adj","examples":["the other person.","on the other hand."]},
+    "important": {"definition":"Of great significance.","type":"adj","examples":["important work.","this is important."]},
+    "very": {"definition":"To a high degree.","type":"adv","examples":["very good.","very quickly."]},
+    "often": {"definition":"Frequently.","type":"adv","examples":["we often meet.","he often calls."]},
+    "always": {"definition":"At all times.","type":"adv","examples":["she always smiles.","always check facts."]},
+    "sometimes": {"definition":"Occasionally.","type":"adv","examples":["sometimes i read.","we sometimes travel."]},
+    "however": {"definition":"Used to introduce a contrast.","type":"adv","examples":["however, it may fail.","we tried; however it didn't work."]},
+    "then": {"definition":"At that time; next.","type":"adv","examples":["then we left.","finish, then rest."]},
+    "in": {"definition":"Expressing location or position.","type":"prep","examples":["in the room.","living in the city."]},
+    "on": {"definition":"Positioned above and in contact with.","type":"prep","examples":["on the table.","on monday."]},
+    "at": {"definition":"Used for specific times/places.","type":"prep","examples":["at noon.","meet at the park."]},
+    "with": {"definition":"Accompanied by.","type":"prep","examples":["with a friend.","cut with a knife."]},
+    "for": {"definition":"With the purpose of.","type":"prep","examples":["for example.","i did it for you."]},
+    "and": {"definition":"Conjunction joining words or phrases.","type":"conj","examples":["bread and butter.","he and she."]},
+    "but": {"definition":"Conjunction showing contrast.","type":"conj","examples":["i like it but...","it was small but useful."]},
+    "or": {"definition":"Conjunction indicating alternatives.","type":"conj","examples":["tea or coffee?","now or later."]},
+    "if": {"definition":"Introducing a conditional clause.","type":"conj","examples":["if it rains, we'll stay.","ask if needed."]},
+    "will": {"definition":"Modal verb indicating future.","type":"modal","examples":["i will go.","she will join."]},
+    "can": {"definition":"Modal verb indicating ability or possibility.","type":"modal","examples":["can you help?","it can work."]},
+    "there is": {"definition":"Used to state existence.","type":"phrase","examples":["there is a way to solve it.","there is a message for you."]},
+    "i think": {"definition":"Phrase expressing opinion.","type":"phrase","examples":["i think we should go.","i think it's correct."]},
+    "for example": {"definition":"Used to give an example.","type":"phrase","examples":["many fruits, for example apples, are healthy."]},
+    "in order to": {"definition":"With the purpose to.","type":"phrase","examples":["in order to learn, practice is required."]},
+    "paris": {"definition":"Capital city of France.","type":"place","examples":["paris is beautiful in spring.","i visited paris."]},
+    "python": {"definition":"A high-level programming language.","type":"noun","examples":["i wrote the script in python.","python is popular."]},
+    "gravity": {"definition":"Force attracting objects to one another.","type":"noun","examples":["gravity keeps us grounded.","gravity affects motion."]},
+    "pi": {"definition":"Mathematical constant ≈ 3.14159.","type":"number","examples":["pi is used to compute circumference."]},
+    "learn": {"definition":"Gain knowledge by study.","type":"verb","examples":["we learn from mistakes.","i want to learn more."]},
+    "help": {"definition":"Provide assistance.","type":"verb","examples":["can you help me?","thanks for the help."]},
+    "start": {"definition":"Begin doing something.","type":"verb","examples":["start now.","we start at nine."]},
+    "finish": {"definition":"Bring to an end.","type":"verb","examples":["finish the task.","he finished quickly."]},
+    "read": {"definition":"Look at and understand written words.","type":"verb","examples":["read the book.","i like to read."]},
+    "write": {"definition":"Mark letters to form words.","type":"verb","examples":["write a note.","she writes code."]},
+    "play": {"definition":"Take part in activity for enjoyment.","type":"verb","examples":["let's play a game.","they play music."]},
+    "quick": {"definition":"Moving fast.","type":"adj","examples":["a quick reply.","quick and simple."]},
+    "slow": {"definition":"Moving at a low speed.","type":"adj","examples":["a slow process.","don't be slow."]},
+    "happy": {"definition":"Feeling or showing pleasure.","type":"adj","examples":["she felt happy.","a happy ending."]},
+    "sad": {"definition":"Feeling sorrow.","type":"adj","examples":["a sad story.","don't be sad."]},
+    "carefully": {"definition":"With care or attention.","type":"adv","examples":["read carefully.","drive carefully."]},
+    "easily": {"definition":"Without difficulty.","type":"adv","examples":["it can be done easily.","she solved it easily."]},
+    "man": {"definition":"An adult male human.","type":"noun","examples":["the man waved.","he was a kind man."]},
+    "woman": {"definition":"An adult female human.","type":"noun","examples":["the woman smiled.","she is a strong woman."]},
+    "child": {"definition":"A young person.","type":"noun","examples":["the child laughed.","children play often."]},
+    "place": {"definition":"A particular position or point in space.","type":"noun","examples":["this is a good place.","where is the place?"]},
+    "person": {"definition":"A human being.","type":"noun","examples":["she is a kind person.","every person matters."]},
     "__corpus__": {"definition":"small starter corpus","type":"corpus","examples":["the cat sat on the mat.","do you like apples?"]}
 }
+
+# If a full dictionary file exists, we'll lazily load it when needed.
 BASE_DICT = MINI_BASE_DICT.copy()
 
 def merged_dictionary() -> Dict[str, Dict[str,Any]]:
+    """Merge base dict with learned items."""
     d = {k.lower(): dict(v) for k,v in BASE_DICT.items()}
     for k,v in ai_state.get("learned", {}).items():
         d[k.lower()] = {"definition": v.get("definition",""), "type": v.get("type","learned"), "examples": v.get("examples",[])}
     return d
 
 # -------------------------
-# Compact KB (startup)
+# Compact KB (keeps small for fast startup)
 # -------------------------
 KB = {
     "capital of france": "Paris.",
@@ -160,7 +218,7 @@ KB = {
 }
 
 # -------------------------
-# Vocab / vectors helpers
+# Lightweight vectorizer & vocab builder (on demand)
 # -------------------------
 _cached_vocab = []
 _cached_key = None
@@ -195,7 +253,7 @@ def text_to_vector(text: str, vocab_list: List[str]) -> List[float]:
     return [x/norm for x in vec]
 
 # -------------------------
-# TinyNN (on-demand)
+# TinyNN (very small & trained only on demand)
 # -------------------------
 def random_matrix(rows, cols, scale=0.1):
     return [[(random.random()*2-1)*scale for _ in range(cols)] for _ in range(rows)]
@@ -262,11 +320,12 @@ class TinyNN:
                         self.W1[j][k] -= lr * err_hidden[j] * x_vec[k]
                     self.b1[j] -= lr * err_hidden[j]
 
+# placeholders (constructed on rebuild)
 VOCAB: List[str] = []
 NN_MODEL: Optional[TinyNN] = None
 
 # -------------------------
-# Markov (improved + in-memory only when ephemeral)
+# Markov (lightweight and fast; training sampled on rebuild)
 # -------------------------
 class Markov:
     def __init__(self):
@@ -283,34 +342,22 @@ class Markov:
             self.map.setdefault(key, {})
             self.map[key][nxt] = self.map[key].get(nxt, 0) + 1
 
-    def _best_choice(self, choices: Dict[str,int], seed_tokens:set) -> Optional[str]:
-        best = None; best_score = -1
-        for token, freq in choices.items():
-            score = freq
-            if token in seed_tokens:
-                score += max(1, freq//2)
-            for s in seed_tokens:
-                if s and (s in token or token in s):
-                    score += max(1, freq//3)
-            if score > best_score:
-                best_score = score; best = token
-        return best
-
     def generate(self, seed=None, max_words=40, capitalize_if=True):
+        # simple, fast backoff: choose best next by frequency
         seed_tokens = set(tokenize(seed)) if seed else set()
         if seed:
             toks = tokenize(seed)
             if len(toks) >= 2:
                 key = (toks[-2].lower(), toks[-1].lower())
                 if key not in self.map:
-                    candidate_keys = [k for k in self.map.keys() if (k[0] in seed_tokens or k[1] in seed_tokens)]
-                    key = random.choice(candidate_keys) if candidate_keys else (random.choice(self.starts) if self.starts else None)
+                    # quick backoff: pick a random start
+                    key = random.choice(self.starts) if self.starts else None
                 if key:
                     out = [key[0], key[1]]
                     for _ in range(max_words-2):
                         choices = self.map.get((out[-2], out[-1]), {})
                         if not choices: break
-                        nxt = self._best_choice(choices, seed_tokens) or max(choices.items(), key=lambda kv: kv[1])[0]
+                        nxt = max(choices.items(), key=lambda kv: kv[1])[0]
                         out.append(nxt)
                         if re.fullmatch(r"[\.!\?;,:]", nxt):
                             break
@@ -321,6 +368,7 @@ class Markov:
                     if not re.search(r"[\.!\?]$", s):
                         s = s + "."
                     return s
+        # random start fallback
         if not self.starts:
             return ""
         key = random.choice(self.starts)
@@ -357,12 +405,10 @@ class Markov:
 
 MARKOV = Markov()
 
-# In ephemeral mode we do not persist markov; but if non-ephemeral try to load it
 def load_markov_if_exists():
-    if EPHEMERAL_MODE:
-        return False
     ser = load_json(MARKOV_FILE, None)
     if ser and isinstance(ser, dict) and "map" in ser:
+        # deserialize
         starts = ser.get("starts", [])
         m = {}
         for k,v in ser.get("map", {}).items():
@@ -373,29 +419,36 @@ def load_markov_if_exists():
         return True
     return False
 
+# try load persisted markov (fast path) — if available we avoid rebuilding
 _markov_loaded = load_markov_if_exists()
 
+# -------------------------
+# Fast sampled Markov training used only when rebuilding
+# -------------------------
 def sampled_markov_train(limit_examples=2000):
     MARKOV.map.clear(); MARKOV.starts.clear()
     md = merged_dictionary()
+    # gather examples — we will sample to keep training fast
     examples = []
     for k,v in md.items():
         for ex in v.get("examples", []):
             examples.append(ex)
         examples.append(k + " " + v.get("definition",""))
+    # include conversation history too
     examples.extend(c.get("text","") for c in ai_state.get("conversations", []))
     random.shuffle(examples)
+    # cap examples to limit for speed
     for ex in examples[:limit_examples]:
         MARKOV.train(ex)
-    if not EPHEMERAL_MODE:
-        try:
-            ser = {"starts": MARKOV.starts, "map": {f"{a}||{b}":nxts for (a,b),nxts in MARKOV.map.items()}}
-            save_json(MARKOV_FILE, ser)
-        except Exception:
-            pass
+    # persist
+    try:
+        ser = {"starts": MARKOV.starts, "map": {f"{a}||{b}":nxts for (a,b),nxts in MARKOV.map.items()}}
+        save_json(MARKOV_FILE, ser)
+    except Exception:
+        pass
 
 # -------------------------
-# Build & train model (on demand)
+# Build & train model (on demand via UI) — fast settings
 # -------------------------
 INTENTS = ["define","fact","math","time","date","teach","chat"]
 SEED_EXAMPLES = [
@@ -411,6 +464,7 @@ SEED_EXAMPLES = [
 def build_and_train_model(force: bool=False):
     global VOCAB, NN_MODEL
     VOCAB = build_vocab(force=force)
+    # small hidden layer for speed
     hidden_dim = max(16, len(VOCAB)//20 or 16)
     NN_MODEL = TinyNN(len(VOCAB), hidden_dim, len(INTENTS))
     dataset = []
@@ -421,14 +475,16 @@ def build_and_train_model(force: bool=False):
         dataset.append((text_to_vector(phrase, VOCAB), INTENTS.index("teach")))
     if dataset:
         NN_MODEL.train(dataset, epochs=6, lr=0.06)
+    # sample Markov training to be fast
     sampled_markov_train(limit_examples=1500)
     ai_state["model_dirty"] = False
-    save_state()
+    save_json(STATE_FILE, ai_state)
 
 # -------------------------
-# Semantic helpers (TF-IDF)
+# Semantic helpers (sklearn TF-IDF + cosine)
 # -------------------------
 def rebuild_semantic_index(force: bool=False):
+    """Build TF-IDF matrix over dictionary + learned definitions (thread-safe)."""
     global _vectorizer, _matrix, _indexed_keys
     if TfidfVectorizer is None:
         return
@@ -443,12 +499,14 @@ def rebuild_semantic_index(force: bool=False):
             _vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
             _matrix = _vectorizer.fit_transform(corpus)
             _indexed_keys = keys
+            # mark model as up-to-date
             ai_state["model_dirty"] = False
-            save_state()
+            save_json(STATE_FILE, ai_state)
         except Exception as e:
             print("Failed to build semantic index:", e)
 
 def find_similar_terms(query: str, topn: int = 6):
+    """Find similar words or definitions to a query using cosine similarity."""
     global _vectorizer, _matrix, _indexed_keys
     if TfidfVectorizer is None:
         return []
@@ -458,9 +516,7 @@ def find_similar_terms(query: str, topn: int = 6):
         try:
             vec = _vectorizer.transform([query])
             sims = cosine_similarity(vec, _matrix)[0]
-            pairs = list(enumerate(sims))
-            pairs.sort(key=lambda x: x[1], reverse=True)
-            top_idx = [i for i,_ in pairs[:topn]]
+            top_idx = sims.argsort()[::-1][:topn]
             return [( _indexed_keys[i], float(sims[i]) ) for i in top_idx if sims[i] > 0.08]
         except Exception:
             return []
@@ -479,7 +535,7 @@ def semantic_answer(query: str) -> Optional[str]:
     return None
 
 # -------------------------
-# Utilities (learn/patterns)
+# Utilities (definitions/learn)
 # -------------------------
 LEARN_PATTERNS = [
     re.compile(r'^\s*define\s+([^\:]+)\s*[:\-]\s*(.+)$', re.I),
@@ -532,11 +588,12 @@ def lookup_kb(query: str) -> Tuple[Optional[str], float]:
     return None, 0.0
 
 # -------------------------
-# Persona
+# Persona system (clean, colorful)
 # -------------------------
 def apply_persona(text: str, persona: str) -> str:
     persona = (persona or "neutral").lower()
     if persona == "cowboy":
+        # informal, friendly, a bit folksy
         if not text.endswith((".", "!", "?")):
             text = text + "."
         return f"Howdy — {text} Y'all take care now."
@@ -548,218 +605,41 @@ def apply_persona(text: str, persona: str) -> str:
         return f"{text} Please let me know if you require further clarification."
     if persona == "casual":
         return f"{text} — cool?"
+    # neutral or unknown
     return text
 
+# -------------------------
+# Compose reply (central respond helper)
+# -------------------------
 def respond(reply_text: str, meta: Dict[str,Any]) -> Dict[str,Any]:
     persona = ai_state.get("settings", {}).get("persona", "neutral")
     reply_text = apply_persona(reply_text, persona)
     return {"reply": reply_text, "meta": meta}
 
-# -------------------------
-# Massive KB generator (in-memory only if EPHEMERAL_MODE True)
-# -------------------------
-def build_massive_kb(save_to_file: bool = False,
-                     people_count: int = 1200,
-                     foods_count: int = 600,
-                     research_count: int = 600,
-                     recipes_per_food: int = 1,
-                     min_total: int = 5000) -> dict:
-    # identical generator as before but note: we will save only if not ephemeral or if save_to_file True and not ephemeral
-    kb = {}
-    # small seeds and then bulk generation (kept concise here)
-    kb.update({
-        "what is pi":"Pi (π) ≈ 3.14159.",
-        "who wrote hamlet":"William Shakespeare."
-    })
-    # generate people, foods, research, recipes as prior code...
-    # (for brevity in this script body I'm using the same algorithm as earlier; the generator is unchanged)
-    # --- people
-    first_names = ["alex","sam","morgan","jordan","taylor","casey","ashley","jamie","chris","pat","drew","blake","riley","cameron","logan","maria","ana","linda","mike","david","sarah","jose","juan","li","wei","mina","rahul","ola","kofi","fatima"]
-    last_names = ["smith","johnson","williams","brown","jones","garcia","miller","davis","martinez","hernandez","lopez","gonzalez","wilson","anderson","thomas","taylor","moore","jackson","martin","lee","perez"]
-    professions = ["researcher","engineer","teacher","doctor","nurse","artist","musician","writer","journalist","scientist","chef","designer","developer","entrepreneur","farmer","pilot","lawyer","architect","pharmacist","historian"]
-    people = []; seen=set()
-    for a,b in [(a,b) for a in first_names for b in last_names]:
-        if len(people) >= people_count: break
-        name = f"{a.capitalize()} {b.capitalize()}"
-        if name in seen: continue
-        seen.add(name)
-        prof = random.choice(professions)
-        short = f"{name} is a {prof} known for work in {random.choice(['education','technology','healthcare','art','music','community service','research'])}."
-        kb[f"who is {name.lower()}"] = short
-        people.append(name)
-    idx = 1
-    while len(people) < people_count:
-        fn = random.choice(first_names).capitalize()
-        ln = f"Person{idx}"
-        name = f"{fn} {ln}"
-        if name in seen:
-            idx += 1; continue
-        seen.add(name)
-        prof = random.choice(professions)
-        short = f"{name} is a {prof} with experience in {random.choice(['policy','data','design','research','education','business'])}."
-        kb[f"who is {name.lower()}"] = short
-        people.append(name); idx += 1
-    # --- foods + recipes
-    base_foods = ["apple","banana","orange","pear","grape","mango","pineapple","strawberry","blueberry","kiwi","tomato","potato","carrot","lettuce","spinach","onion","garlic","pepper","cucumber","broccoli","rice","pasta","pizza","sandwich","soup","salad","chicken","beef","pork","lamb","salmon","tuna","shrimp","tofu","yogurt","butter","milk","coffee","tea","juice"]
-    adjectives = ["roasted","grilled","fresh","smoked","spiced","creamy","crispy","candied","marinated","pickled","herbed","zesty","sweet","savory"]
-    foods=[]
-    while len(foods) < foods_count:
-        stem=random.choice(base_foods)
-        adj=random.choice(adjectives) if random.random()<0.6 else ""
-        name=(adj+" "+stem).strip() if adj else stem
-        key=name.replace(" ","_").lower()
-        if key not in foods:
-            foods.append(key); kb[f"what is {name}"]=f"{name.capitalize()} is a food item commonly used in many cuisines."
-    cnt=1
-    while len(foods) < foods_count:
-        fkey=f"food_item_{cnt}"
-        if fkey not in foods:
-            foods.append(fkey); kb[f"what is {fkey.replace('_',' ')}"]=f"{fkey.replace('_',' ').capitalize()} is a synthetic food item."
-        cnt+=1
-    actions=["preheat the oven to 180°C","slice the ingredients","mix well","simmer for 10 minutes","boil until tender","fry until golden","bake until done","serve warm","season with salt and pepper","garnish with herbs"]
-    for f in foods:
-        dish=f.replace("_"," ")
-        steps=random.choice([1,2,3])
-        recipe_text=" ".join([f"{i+1}. {random.choice(actions).capitalize()}." for i in range(steps)])
-        kb[f"how to cook {dish}"]=recipe_text; kb[f"recipe for {dish}"]=recipe_text
-    # --- research topics
-    research_fields = ["machine learning","biotechnology","quantum computing","renewable energy","material science","neuroscience","robotics","climate change","astrobiology","public health","economics","anthropology","sociology","linguistics","cybersecurity"]
-    research_topics=[]
-    while len(research_topics) < research_count:
-        field=random.choice(research_fields)
-        modifier=random.choice(["applications","methods","ethics","optimization","benchmarks","robustness","interpretability","privacy","scalability"])
-        topic=f"{field} {modifier}"
-        if topic not in research_topics:
-            research_topics.append(topic); kb[f"what is research on {topic}"]=f"Research on {topic} explores methods and applications in {field}."
-    ridx=1
-    while len(research_topics) < research_count:
-        t=f"research topic {ridx}"
-        research_topics.append(t); kb[f"what is research on {t}"]=f"Research on {t} investigates related questions and methods."
-        ridx+=1
-    # enough filler to reach min_total
-    j=1
-    while len(kb) < min_total:
-        q=f"what is placeholder_topic_{j}"; kb[q]=f"Placeholder topic {j} for KB expansion."; j+=1
-    # save to 'disk' only if not ephemeral and if caller asked to save
-    if not EPHEMERAL_MODE and save_to_file:
-        try:
-            save_json(KB_FILE, kb)
-        except Exception:
-            pass
-    elif EPHEMERAL_MODE:
-        # store in-session for immediate use if ephemeral
-        save_json(KB_FILE, kb)
-    return kb
+def safe_eval_math(expr: str):
+    try:
+        filtered = re.sub(r"[^0-9\.\+\-\*\/\%\(\)\s\^]", "", expr)
+        if not re.search(r"\d", filtered): return None
+        filtered = filtered.replace("^", "**")
+        result = eval(filtered, {"__builtins__": None}, {"math": math})
+        return result
+    except Exception:
+        return None
 
-# -------------------------
-# Geography & planets (in-memory or saved only when permitted)
-# -------------------------
-def enrich_kb_with_geography(kb: dict, save_local_copy: bool=False) -> dict:
-    # embedded minimal but wide coverage; same as prior code
-    embedded = [
-        {"country":"France","capital":"Paris","continent":"Europe"},
-        {"country":"Germany","capital":"Berlin","continent":"Europe"},
-        {"country":"Spain","capital":"Madrid","continent":"Europe"},
-        {"country":"Italy","capital":"Rome","continent":"Europe"},
-        {"country":"United States","capital":"Washington, D.C.","continent":"North America"},
-        {"country":"Canada","capital":"Ottawa","continent":"North America"},
-        {"country":"China","capital":"Beijing","continent":"Asia"},
-        {"country":"India","capital":"New Delhi","continent":"Asia"},
-        {"country":"Brazil","capital":"Brasília","continent":"South America"},
-        {"country":"Australia","capital":"Canberra","continent":"Oceania"},
-        # (more can be generated or added)
-    ]
-    for item in embedded:
-        country = str(item.get("country","")).strip()
-        if not country: continue
-        cap = str(item.get("capital","")).strip() or "N/A"
-        cont = str(item.get("continent","")).strip() or "Unknown"
-        kb[f"capital of {country.lower()}"] = f"{cap} (continent: {cont})"
-        kb[f"what continent is {country.lower()}"] = cont
-    planets = {
-        "mercury":"Mercury is the smallest planet and closest to the Sun; it has extreme temperature variations.",
-        "venus":"Venus is similar in size to Earth but has a thick, toxic atmosphere and very high surface temperatures.",
-        "earth":"Earth is the third planet from the Sun and the only known planet to support life.",
-        "mars":"Mars is the red planet with the largest volcano (Olympus Mons) and evidence of past water.",
-        "jupiter":"Jupiter is the largest planet, a gas giant with a prominent storm called the Great Red Spot.",
-        "saturn":"Saturn is a gas giant known for its extensive rings.",
-        "uranus":"Uranus is an ice giant with a tilted rotation axis.",
-        "neptune":"Neptune is an ice giant known for strong winds and storms.",
-        "pluto":"Pluto is a dwarf planet in the Kuiper Belt."
-    }
-    for p,desc in planets.items():
-        kb[f"what is {p}"] = desc
-        kb[f"is {p} a planet"] = "Yes." if p != "pluto" else "Pluto is a dwarf planet."
-    # save if non-ephemeral and requested
-    if not EPHEMERAL_MODE and save_local_copy:
-        try:
-            save_json(COUNTRIES_FILE, {"countries": embedded})
-        except Exception:
-            pass
-    elif EPHEMERAL_MODE:
-        save_json(COUNTRIES_FILE, {"countries": embedded})
-    return kb
-
-# -------------------------
-# Compose reply
-# -------------------------
-LEARN_PATTERNS = [
-    re.compile(r'^\s*define\s+([^\:]+)\s*[:\-]\s*(.+)$', re.I),
-    re.compile(r'^\s*([A-Za-z\'\-\s]+)\s+means\s+(.+)$', re.I),
-    re.compile(r'^\s*([A-Za-z\'\-\s]+)\s+is\s+(.+)$', re.I),
-]
-
-def normalize_key(s: str) -> str:
-    return re.sub(r"[^a-z0-9\s]", "", s.lower()).strip()
-
-def try_extract_definition(text: str) -> Tuple[Optional[str], Optional[str]]:
-    s = text.strip()
-    for pat in LEARN_PATTERNS:
-        m = pat.match(s)
-        if m:
-            left = m.group(1).strip(); right = m.group(2).strip().rstrip(".")
-            left_token = left.split()[0]
-            return normalize_key(left_token), right
-    return None, None
-
-def retrieve_from_memory_or_learned(query: str) -> Optional[str]:
-    qtokens = set(tokenize(query))
-    best_score = 0; best_text = None
-    for conv in ai_state.get("conversations", []):
-        t = conv.get("text","")
-        sc = len(qtokens & set(tokenize(t)))
-        if sc > best_score:
-            best_score = sc; best_text = t
-    for k,v in ai_state.get("learned", {}).items():
-        sc = len(qtokens & set(tokenize(k + " " + v.get("definition",""))))
-        if sc > best_score:
-            best_score = sc; best_text = f"{k}: {v.get('definition','')}"
-    if best_score >= 1:
-        return best_text
-    return None
-
-def lookup_kb(query: str) -> Tuple[Optional[str], float]:
-    q = normalize_key(query.strip("? "))
-    if q in KB: return KB[q], 0.95
-    qtokens = set(tokenize(q))
-    best = None; best_score = 0
-    for k,v in KB.items():
-        sc = len(qtokens & set(tokenize(k)))
-        if sc > best_score:
-            best_score = sc; best = v
-    if best_score >= 1: return best, 0.7
-    for k,v in ai_state.get("learned", {}).items():
-        if normalize_key(k) in q or normalize_key(q) in k:
-            return v.get("definition",""), 0.85
-    return None, 0.0
+def format_definition(key: str, entry: Dict[str,Any]) -> str:
+    ex = entry.get("examples", [])
+    ex_text = ("\nExamples:\n - " + "\n - ".join(ex)) if ex else ""
+    return f"{key} ({entry.get('type','')}): {entry.get('definition','')}{ex_text}"
 
 def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences: Optional[int]=None) -> Dict[str,Any]:
     user = user_text.strip()
     lower = user.lower()
+    # command handlers
     if lower in ("/clear", "clear chat"):
-        ai_state["conversations"].clear(); save_state(); return respond("Chat cleared.", {"intent":"memory"})
+        ai_state["conversations"].clear(); save_json(STATE_FILE, ai_state); return respond("Chat cleared.", {"intent":"memory"})
     if lower in ("/forget", "forget"):
-        ai_state["learned"].clear(); save_state(); ai_state["model_dirty"]=True; save_state()
+        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); ai_state["model_dirty"]=True; save_json(STATE_FILE, ai_state)
+        # trigger semantic rebuild in background
         threading.Thread(target=rebuild_semantic_index).start()
         return respond("Learned memory cleared.", {"intent":"memory"})
     if lower.startswith("/delete "):
@@ -768,42 +648,47 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
             idx = int(arg)-1
             if 0 <= idx < len(ai_state.get("conversations", [])):
                 removed = ai_state["conversations"].pop(idx)
-                save_state()
+                save_json(STATE_FILE, ai_state)
                 return respond(f"Deleted conversation #{idx+1}: {removed.get('text')}", {"intent":"memory"})
             else:
                 return respond("Invalid conversation index.", {"intent":"error"})
         else:
             key = normalize_key(arg)
             if key in ai_state.get("learned", {}):
-                ai_state["learned"].pop(key); save_state(); ai_state["model_dirty"]=True; save_state()
+                ai_state["learned"].pop(key); save_json(STATE_FILE, ai_state); ai_state["model_dirty"]=True; save_json(STATE_FILE, ai_state)
                 threading.Thread(target=rebuild_semantic_index).start()
                 return respond(f"Removed learned definition for '{key}'.", {"intent":"memory"})
             else:
                 return respond(f"No learned definition for '{key}'.", {"intent":"error"})
+    # persona command
     if lower.startswith("/persona ") or lower.startswith("persona "):
         parts = user.split(None,1)
         if len(parts) > 1:
             p = parts[1].strip().lower()
             ai_state.setdefault("settings", {})["persona"] = p
-            save_state()
+            save_json(STATE_FILE, ai_state)
             return respond(f"Persona set to '{p}'.", {"intent":"persona"})
         else:
             return respond(f"Current persona: {ai_state.get('settings',{}).get('persona','neutral')}", {"intent":"persona"})
+    # math
     math_res = safe_eval_math(user)
     if math_res is not None:
         return respond(f"Math result: {math_res}", {"intent":"math"})
+    # time/date
     if re.search(r"\bwhat(?:'s| is)? the time\b|\btime now\b|\bcurrent time\b", lower):
         return respond(f"The current time is {datetime.now().strftime('%H:%M:%S')}", {"intent":"time"})
     if re.search(r"\bwhat(?:'s| is)? the date\b|\bcurrent date\b|\bdate today\b", lower):
         return respond(f"Today's date is {datetime.now().strftime('%Y-%m-%d')}", {"intent":"date"})
+    # define command
     if lower.startswith("/define ") or lower.startswith("define "):
         rest = user.split(None,1)[1] if len(user.split(None,1))>1 else ""
         m = re.match(r'\s*([^\:]+)\s*[:\-]\s*(.+)', rest)
         if m:
             w = normalize_key(m.group(1)); d = m.group(2).strip()
             ai_state.setdefault("learned", {})[w] = {"definition": d, "type":"learned", "examples": []}
-            save_state()
-            ai_state["model_dirty"] = True; save_state()
+            save_json(STATE_FILE, ai_state)
+            ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
+            # rebuild semantic index in background
             threading.Thread(target=rebuild_semantic_index).start()
             return respond(f"Learned definition for '{w}'.", {"intent":"learning"})
         m2 = re.match(r'\s*([A-Za-z\'\- ]+)\s*$', rest)
@@ -815,26 +700,32 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
             else:
                 return respond(f"No definition for '{key}'. Use '/define {key}: <meaning>' to teach me.", {"intent":"definition"})
         return respond("Usage: /define word: definition", {"intent":"define"})
+    # natural teach patterns
     w,d = try_extract_definition(user)
     if w and d:
         ai_state.setdefault("learned", {})[w] = {"definition": d, "type":"learned", "examples": []}
-        save_state()
-        ai_state["model_dirty"] = True; save_state()
+        save_json(STATE_FILE, ai_state)
+        ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
         threading.Thread(target=rebuild_semantic_index).start()
         return respond(f"Saved learned definition: '{w}' = {d}", {"intent":"learning"})
+    # quick KB lookup
     ans, conf = lookup_kb(user)
     if ans:
         return respond(str(ans), {"intent":"fact","confidence":conf})
+    # retrieval
     mem = retrieve_from_memory_or_learned(user)
     if mem:
         return respond(mem, {"intent":"memory"})
+    # semantic dictionary search (sklearn powered)
     sem = semantic_answer(user)
     if sem:
         return respond(sem, {"intent":"semantic"})
+    # paragraph generation if requested
     if paragraph_sentences and paragraph_sentences > 0:
         para = MARKOV.generate_paragraph(seed=(user if user else None), topic=topic, num_sentences=paragraph_sentences)
         if para:
             return respond(para, {"intent":"gen_paragraph"})
+    # markov single generation
     gen = MARKOV.generate(seed=user)
     if gen:
         if re.search(r"[\.!\?]\s*$", user):
@@ -845,64 +736,135 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
     return respond("I don't know that yet. Teach me with 'X means Y' or '/define X: Y'.", {"intent":"unknown"})
 
 # -------------------------
-# UI & Controls (ephemeral friendly)
+# Dictionary generation (expensive) — run only when user asks
 # -------------------------
-st.set_page_config(page_title="Omega-B (ephemeral)", layout="wide")
-st.title("Omega-B (ephemeral mode)" if EPHEMERAL_MODE else "Omega-B")
+def generate_large_dictionary(min_entries: int=2000):
+    # simple programmatic builder (similar to earlier blocks) but run only when triggered
+    def examples_for(word, typ):
+        if typ == "noun":
+            return [f"the {word} is on the table.", f"i saw a {word} yesterday."]
+        if typ == "verb":
+            return [f"i {word} every day.", f"please {word} carefully."]
+        if typ == "adj":
+            return [f"that is very {word}.", f"the {word} example."]
+        if typ == "adv":
+            return [f"do it {word}.", f"they moved {word}"]
+        if typ == "food":
+            return [f"i like {word}.", f"{word} is delicious."]
+        return [f"{word} example."]
+    BASE = {}
+    # seeds
+    seeds = []
+    # small curated lists (shortened here for speed but plenty to reach 2k after morphs)
+    seeds += "cat dog bird fish cow horse goat pig chicken turkey apple banana orange grape bread cheese rice pasta pizza salad soup sandwich tomato potato carrot onion garlic pepper".split()
+    seeds += "eat drink cook bake boil fry chop slice mix stir serve taste walk run jump drive read write play learn teach think know make get take give find see watch listen create build open close start stop continue".split()
+    seeds += "red blue green black white yellow pink purple brown gray silver gold".split()
+    # add more stems by programmatic families (numbers, materials, body parts, places...)
+    seeds += "meter kilometer gram kilogram liter ounce pound inch foot yard mile second minute hour day week month year".split()
+    seeds += "wood metal plastic glass stone brick concrete paper cloth leather cotton silk wool linen".split()
+    seeds += "head face eye ear nose mouth neck shoulder arm hand finger leg knee foot toe".split()
+    seeds += "paris london berlin rome madrid tokyo beijing moscow washington ottawa canberra".split()
+    for s in seeds:
+        s = s.lower().replace(" ", "_")
+        if s not in BASE:
+            typ = "noun"
+            if s in ("eat","drink","cook","bake","boil","fry","chop","slice","mix","stir","serve","taste","walk","run","jump","drive","read","write","play","learn","teach","think","know","make","get","take","give"):
+                typ = "verb"
+            BASE[s] = {"definition": f"{typ} {s.replace('_',' ')}", "type": typ, "examples": examples_for(s.replace("_"," "), typ)}
+    # morphological variants to reach target
+    def make_plural(w):
+        if w.endswith(("s","x","z","ch","sh")): return w + "es"
+        if w.endswith("y") and len(w)>1 and w[-2] not in "aeiou": return w[:-1] + "ies"
+        return w + "s"
+    def make_ing(w):
+        if w.endswith("ie"): return w[:-2] + "ying"
+        if w.endswith("e") and not w.endswith("ee"): return w[:-1] + "ing"
+        if len(w)>=3 and (w[-1] not in "aeiou" and w[-2] in "aeiou" and w[-3] not in "aeiou"): return w + w[-1] + "ing"
+        return w + "ing"
+    i = 0
+    words = list(BASE.keys())
+    while len(BASE) < min_entries and i < 20000:
+        base = words[i % len(words)]
+        i += 1
+        v = make_plural(base)
+        if v not in BASE and len(v) < 40:
+            BASE[v] = {"definition": f"plural of {base.replace('_',' ')}", "type":"noun", "examples":[f"the {v.replace('_',' ')} are here."]}
+        # verbs -> ing, ed
+        if BASE[base]["type"] == "verb":
+            ing = make_ing(base)
+            if ing not in BASE:
+                BASE[ing] = {"definition": f"{ing} (form)", "type":"verb", "examples":[f"i am {ing.replace('_',' ')}."]}
+        words = list(BASE.keys())
+    # ensure fill if still short
+    cntr = 1
+    while len(BASE) < min_entries:
+        key = f"term_{cntr}"
+        if key not in BASE:
+            BASE[key] = {"definition": f"synthetic filler {cntr}", "type":"noun", "examples":[f"{key} example."]}
+        cntr += 1
+    return BASE
+
+# -------------------------
+# UI & controls
+# -------------------------
+st.set_page_config(page_title="Omega-B             ", layout="wide")
+st.title("Omega-B")
 
 left, right = st.columns([3,1])
 
 with right:
-    st.header("Quick Controls")
-    st.markdown("Ephemeral mode is " + ("ON — heavy assets are in-memory and remade on reset." if EPHEMERAL_MODE else "OFF — assets saved to disk."))
-
-    if st.button("Reset (clear all runtime assets)"):
-        # Clear ai_state entirely (ephemeral)
-        ai_state.clear()
-        ai_state.update({"conversations": [], "learned": {}, "settings": {"persona":"neutral"}, "model_dirty": True})
-        # clear ephemeral store if in-memory
-        if EPHEMERAL_MODE:
-            st.session_state.pop("_ephemeral_store", None)
+    st.header("Performance Controls")
+    st.markdown("This app defers heavy work to you. Click buttons below when you want the big dictionary or a model rebuild.")
+    if st.button("Load full dictionary (generate or load dictionary.json)"):
+        # if dictionary file exists, load it; otherwise generate and save
+        if os.path.exists(DICT_FILE):
+            try:
+                big = load_json(DICT_FILE, None)
+                if isinstance(big, dict) and len(big) > 1000:
+                    BASE_DICT.update({k:v for k,v in big.items()})
+                    st.success(f"Loaded dictionary.json with {len(big)} entries.")
+                else:
+                    st.warning("dictionary.json exists but looks small or invalid; regenerating.")
+                    with st.spinner("Generating large dictionary (one-time): this may take a few seconds..."):
+                        big = generate_large_dictionary(min_entries=2000)
+                        save_json(DICT_FILE, big)
+                        BASE_DICT.update({k:v for k,v in big.items()})
+                        st.success(f"Generated and saved dictionary.json with {len(big)} entries.")
+            except Exception as e:
+                st.error(f"Failed to load dictionary.json: {e}")
         else:
-            # remove disk files
-            remove_json(STATE_FILE); remove_json(DICT_FILE); remove_json(MARKOV_FILE); remove_json(KB_FILE); remove_json(COUNTRIES_FILE)
-        # rebuild small runtime artifacts
-        save_state()
-        # reset markov object
-        MARKOV.map.clear(); MARKOV.starts.clear()
-        st.success("Reset complete (in-memory assets cleared).")
-        st.experimental_rerun()
-
-    st.markdown("---")
-    if st.button("Generate big KB (in-memory)"):
-        with st.spinner("Generating big KB..."):
-            big = build_massive_kb(save_to_file=False, people_count=800, foods_count=400, research_count=400, min_total=2500)
-            # store in memory (ephemeral) or save to disk if allowed
-            save_json(KB_FILE, big)
-            KB.update(big)
-            enrich_kb_with_geography(KB, save_local_copy=False)
-            ai_state["model_dirty"] = True; save_state()
-            sampled_markov_train(limit_examples=1500)
-        st.success("Big KB generated and loaded (in-memory).")
+            with st.spinner("Generating large dictionary (one-time): this may take a few seconds..."):
+                big = generate_large_dictionary(min_entries=2000)
+                save_json(DICT_FILE, big)
+                BASE_DICT.update({k:v for k,v in big.items()})
+                st.success(f"Generated and saved dictionary.json with {len(big)} entries.")
+        # Mark model dirty to reflect new vocab and rebuild semantic index in background
+        ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
+        threading.Thread(target=rebuild_semantic_index).start()
 
     st.markdown("---")
     st.write("Model status:")
     if ai_state.get("model_dirty", False):
-        st.warning("Model DIRTY — rebuild recommended.")
+        st.warning("Model marked DIRTY — rebuild recommended.")
     else:
         st.success("Model up-to-date.")
-    if st.button("Rebuild Model (fast)"):
-        with st.spinner("Rebuilding model..."):
+
+    if st.button("Rebuild Model (train small NN + sample-Markov)"):
+        with st.spinner("Rebuilding (fast) — this should be quick..."):
             build_and_train_model(force=True)
-        st.success("Model rebuilt.")
-    if st.button("Rebuild Semantic TF-IDF"):
-        with st.spinner("Rebuilding TF-IDF..."):
+            st.success("Rebuild complete — model_dirty cleared.")
+            st.rerun()
+
+    if st.button("Rebuild Semantic Model (TF-IDF)"):
+        with st.spinner("Rebuilding semantic TF-IDF index..."):
             rebuild_semantic_index(force=True)
-        st.success("Semantic rebuilt.")
+            st.success("Semantic model rebuilt.")
+            st.rerun()
 
     st.markdown("---")
+    st.write("Persisted Markov: " + ("loaded" if _markov_loaded else "not found"))
     if st.button("Clear learned memories"):
-        ai_state["learned"].clear(); save_state(); st.success("Learned cleared.")
+        ai_state["learned"].clear(); save_json(STATE_FILE, ai_state); st.success("Learned cleared."); st.rerun()
 
 with left:
     st.subheader("Conversation")
@@ -926,11 +888,13 @@ with left:
             reply = out.get("reply","")
             ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
             ai_state.setdefault("conversations", []).append({"role":"assistant","text":reply,"time":datetime.now().isoformat()})
-            save_state()
+            save_json(STATE_FILE, ai_state)
+            # light on-the-fly training: add the user+reply to markov to improve future generations
             MARKOV.train(ui); MARKOV.train(reply)
-            ai_state["model_dirty"] = True; save_state()
+            ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
+            # trigger semantic rebuild asynchronously (keeps UI responsive)
             threading.Thread(target=rebuild_semantic_index).start()
-            st.experimental_rerun()
+            st.rerun()
 
     if c2.button("Generate Paragraph"):
         ui = user_input.strip()
@@ -939,11 +903,11 @@ with left:
             if ui:
                 ai_state.setdefault("conversations", []).append({"role":"user","text":ui,"time":datetime.now().isoformat()})
             ai_state.setdefault("conversations", []).append({"role":"assistant","text":para,"time":datetime.now().isoformat()})
-            save_state()
+            save_json(STATE_FILE, ai_state)
             MARKOV.train(para)
-            ai_state["model_dirty"] = True; save_state()
+            ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
             threading.Thread(target=rebuild_semantic_index).start()
-            st.experimental_rerun()
+            st.rerun()
 
     if c3.button("Teach (word: definition)"):
         ui = user_input.strip()
@@ -951,11 +915,11 @@ with left:
         if m:
             w = normalize_key(m.group(1)); d = m.group(2).strip()
             ai_state.setdefault("learned", {})[w] = {"definition": d, "type":"learned", "examples": []}
-            save_state()
-            ai_state["model_dirty"] = True; save_state()
+            save_json(STATE_FILE, ai_state)
+            ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
             threading.Thread(target=rebuild_semantic_index).start()
             st.success(f"Learned '{w}'.")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.warning("To teach: enter `word: definition` (e.g. gravity: a force that pulls)")
 
@@ -968,4 +932,4 @@ st.markdown("""
 - Paragraph: type a seed (optional) and a Topic, then click **Generate Paragraph**  
 - Commands: `/clear` (clear conversation), `/forget` (clear learned memories), `/delete N` (delete convo #N)
 """)
-st.caption(f"Device session id: {DEVICE_ID} (ephemeral mode = {EPHEMERAL_MODE}).")
+st.caption(f"Device session id: {DEVICE_ID} (this device's conversations are private).")
