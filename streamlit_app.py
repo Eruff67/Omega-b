@@ -1841,8 +1841,8 @@ with right:
     limit = st.slider("Number of sentences to use", 3, 15, 6)
     if st.button("Fetch & Train from Web"):
             with st.spinner(f"Fetching and training on '{topic}'..."):
-            result = fetch_and_train_markov(topic, limit=limit)
-            st.success(result)
+                result = fetch_and_train_markov(topic, limit=limit)
+                st.success(result)
 
     st.markdown("---")
     st.write("Persisted Markov: " + ("loaded" if _markov_loaded else "not found"))
