@@ -1109,6 +1109,51 @@ class Markov:
 
 MARKOV = Markov()
 
+import requests
+from bs4 import BeautifulSoup
+
+def fetch_and_train_markov(topic: str, limit: int = 5):
+    """
+    Retrieve text snippets about a topic from the web and train the Markov model.
+    - topic: what to search for (e.g. 'cats', 'gravity', 'black holes')
+    - limit: how many sentences to extract
+    """
+    try:
+        # Use a free search endpoint or a simple Wikipedia fetch
+        url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            return f"Couldn't retrieve content for {topic}."
+
+        # Extract visible text
+        soup = BeautifulSoup(r.text, "html.parser")
+        paragraphs = [p.get_text() for p in soup.find_all("p")]
+        text = " ".join(paragraphs)
+        text = re.sub(r"\s+", " ", text)
+
+        # Use sklearn to extract top informative sentences
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        if not sentences:
+            return f"No text found for {topic}."
+
+        # TF-IDF ranking to find most relevant sentences
+        vect = TfidfVectorizer(stop_words="english", max_features=5000)
+        X = vect.fit_transform(sentences)
+        # Simple heuristic: pick top sentences with most unique terms
+        scores = X.sum(axis=1).A.flatten()
+        top_indices = scores.argsort()[::-1][:limit]
+        top_sentences = [sentences[i] for i in top_indices]
+
+        # Train your existing Markov model
+        for s in top_sentences:
+            MARKOV.train(s)
+
+        return f"Trained Markov with {len(top_sentences)} top sentences about '{topic}'."
+
+    except Exception as e:
+        return f"Error during fetch_and_train_markov: {e}"
+
+
 def load_markov_if_exists():
     ser = load_json(MARKOV_FILE, None)
     if ser and isinstance(ser, dict) and "map" in ser:
@@ -1396,9 +1441,11 @@ def build_and_train_model(force: bool=False):
     dataset = []
     for text,intent in SEED_EXAMPLES:
         dataset.append((text_to_vector(text, VOCAB), INTENTS.index(intent)))
+        fetch_and_train_markov(text,20)
     for k,v in ai_state.get("learned", {}).items():
         phrase = f"{k} means {v.get('definition','')}"
         dataset.append((text_to_vector(phrase, VOCAB), INTENTS.index("teach")))
+        fetch_and_train_markov(k,20)
     if dataset:
         NN_MODEL.train(dataset, epochs=6, lr=0.06)
     # sample Markov training to be fast
