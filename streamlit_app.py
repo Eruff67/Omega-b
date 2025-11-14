@@ -1747,8 +1747,8 @@ with right:
         with st.spinner("Generating large dictionary (one-time): this may take a few seconds..."):
              big = generate_manual_dictionary(min_entries=2000)
              save_json(DICT_FILE, big)
-              BASE_DICT.update({k:v for k,v in big.items()})
-              st.success(f"Generated and saved dictionary.json with {len(big)} entries.")
+             BASE_DICT.update({k:v for k,v in big.items()})
+             st.success(f"Generated and saved dictionary.json with {len(big)} entries.")
         # Mark model dirty to reflect new vocab and rebuild semantic index in background
         ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
         threading.Thread(target=rebuild_semantic_index).start()
