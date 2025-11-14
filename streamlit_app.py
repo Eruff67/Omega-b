@@ -1109,49 +1109,66 @@ class Markov:
 
 MARKOV = Markov()
 
+# -------------------------
+# Fetch & train Markov from the web using sklearn TF-IDF
+# -------------------------
 import requests
 from bs4 import BeautifulSoup
 
 def fetch_and_train_markov(topic: str, limit: int = 5):
     """
     Retrieve text snippets about a topic from the web and train the Markov model.
+    Uses Wikipedia as the data source and sklearn for sentence ranking.
+
     - topic: what to search for (e.g. 'cats', 'gravity', 'black holes')
-    - limit: how many sentences to extract
+    - limit: how many top sentences to use
     """
     try:
-        # Use a free search endpoint or a simple Wikipedia fetch
+        if TfidfVectorizer is None:
+            return "❌ scikit-learn not available. Install it with 'pip install scikit-learn'."
+
+        # Retrieve content from Wikipedia
         url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
         r = requests.get(url, timeout=10)
         if r.status_code != 200:
-            return f"Couldn't retrieve content for {topic}."
+            return f"⚠️ Couldn't retrieve content for '{topic}' (HTTP {r.status_code})."
 
-        # Extract visible text
+        # Extract visible text from paragraphs
         soup = BeautifulSoup(r.text, "html.parser")
         paragraphs = [p.get_text() for p in soup.find_all("p")]
         text = " ".join(paragraphs)
-        text = re.sub(r"\s+", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
 
-        # Use sklearn to extract top informative sentences
+        # Split into sentences
         sentences = re.split(r"(?<=[.!?])\s+", text)
-        if not sentences:
-            return f"No text found for {topic}."
+        if not sentences or len(sentences) < 3:
+            return f"No usable text found for '{topic}'."
 
-        # TF-IDF ranking to find most relevant sentences
+        # TF-IDF rank by information density
         vect = TfidfVectorizer(stop_words="english", max_features=5000)
         X = vect.fit_transform(sentences)
-        # Simple heuristic: pick top sentences with most unique terms
         scores = X.sum(axis=1).A.flatten()
         top_indices = scores.argsort()[::-1][:limit]
-        top_sentences = [sentences[i] for i in top_indices]
+        top_sentences = [sentences[i] for i in top_indices if len(sentences[i].split()) > 4]
 
-        # Train your existing Markov model
+        # Train Markov on the extracted sentences
+        count = 0
         for s in top_sentences:
             MARKOV.train(s)
+            count += 1
 
-        return f"Trained Markov with {len(top_sentences)} top sentences about '{topic}'."
+        # Save Markov state (optional)
+        try:
+            ser = {"starts": MARKOV.starts,
+                   "map": {f"{a}||{b}": nxts for (a,b), nxts in MARKOV.map.items()}}
+            save_json(MARKOV_FILE, ser)
+        except Exception:
+            pass
+
+        return f"✅ Markov trained with {count} sentences about '{topic}'."
 
     except Exception as e:
-        return f"Error during fetch_and_train_markov: {e}"
+        return f"⚠️ Error during fetch_and_train_markov: {e}"
 
 
 def load_markov_if_exists():
@@ -1818,6 +1835,14 @@ with right:
             rebuild_semantic_index(force=True)
             st.success("Semantic model rebuilt.")
             st.rerun()
+    st.markdown("---")
+    st.header("Web Markov Trainer")
+    topic = st.text_input("Train Markov using Wikipedia topic:", "cats")
+    limit = st.slider("Number of sentences to use", 3, 15, 6)
+    if st.button("Fetch & Train from Web"):
+            with st.spinner(f"Fetching and training on '{topic}'..."):
+            result = fetch_and_train_markov(topic, limit=limit)
+            st.success(result)
 
     st.markdown("---")
     st.write("Persisted Markov: " + ("loaded" if _markov_loaded else "not found"))
