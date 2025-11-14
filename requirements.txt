@@ -1,4 +1,1 @@
 streamlit
-scikit-learn==1.7.2  # Specify the version you need
-pandas
-numpy
