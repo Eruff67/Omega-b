@@ -1441,11 +1441,11 @@ def build_and_train_model(force: bool=False):
     dataset = []
     for text,intent in SEED_EXAMPLES:
         dataset.append((text_to_vector(text, VOCAB), INTENTS.index(intent)))
-        fetch_and_train_markov(text,20)
+        
     for k,v in ai_state.get("learned", {}).items():
         phrase = f"{k} means {v.get('definition','')}"
         dataset.append((text_to_vector(phrase, VOCAB), INTENTS.index("teach")))
-        fetch_and_train_markov(k,20)
+        
     if dataset:
         NN_MODEL.train(dataset, epochs=6, lr=0.06)
     # sample Markov training to be fast
