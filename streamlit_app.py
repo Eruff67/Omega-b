@@ -1118,7 +1118,7 @@ MARKOV = Markov()
 import requests
 from bs4 import BeautifulSoup
 
-def fetch_and_train_markov(topic: str, limit: int = 5):
+def fetch_and_train_markov(topic: str, limit: int = 5, type):
     """
     Retrieve text snippets about a topic from the web and train the Markov model.
     Uses Wikipedia as the data source and sklearn for sentence ranking.
@@ -1137,7 +1137,11 @@ def fetch_and_train_markov(topic: str, limit: int = 5):
             return "❌ scikit-learn not available. Install it with 'pip install scikit-learn'."
 
         # Wikipedia fetch with browser headers
-        url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
+        if type == "wiki":
+             url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
+        else:
+             url = f"https://reddit.com/r/{topic.replace(' ', '_')}/"
+       
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -1735,7 +1739,7 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
         topic_guess = re.sub(r"[^a-zA-Z0-9\s]", "", user).strip().split()
         if topic_guess:
             topic_guess = topic_guess[-1]  # use last word as rough topic
-            fetch_result = fetch_and_train_markov(topic_guess, limit=8)
+            fetch_result = fetch_and_train_markov(topic_guess, limit=8, "wiki")
             print("[auto-fetch]", fetch_result)
             gen = MARKOV.generate(seed=user, max_words=50)
 
@@ -1864,7 +1868,7 @@ with right:
     limit = st.slider("Number of sentences to use", 3, 15, 6)
     if st.button("Fetch & Train from Web"):
             with st.spinner(f"Fetching and training on '{topic}'..."):
-                result = fetch_and_train_markov(topic, limit=limit)
+                result = fetch_and_train_markov(topic, limit=limit, "wiki")
                 st.success(result)
 
     st.markdown("---")
