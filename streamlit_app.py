@@ -1137,7 +1137,7 @@ def fetch_and_train_markov(topic: str, limit: int = 5):
             return "❌ scikit-learn not available. Install it with 'pip install scikit-learn'."
 
         # Wikipedia 
-             url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
+        url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
         
        
         headers = {
@@ -1737,7 +1737,7 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
         topic_guess = re.sub(r"[^a-zA-Z0-9\s]", "", user).strip().split()
         if topic_guess:
             topic_guess = topic_guess[-1]  # use last word as rough topic
-            fetch_result = fetch_and_train_markov(topic_guess, limit=8, "wiki")
+            fetch_result = fetch_and_train_markov(topic_guess, limit=8)
             print("[auto-fetch]", fetch_result)
             gen = MARKOV.generate(seed=user, max_words=50)
 
@@ -1866,7 +1866,7 @@ with right:
     limit = st.slider("Number of sentences to use", 3, 15, 6)
     if st.button("Fetch & Train from Web"):
             with st.spinner(f"Fetching and training on '{topic}'..."):
-                result = fetch_and_train_markov(topic, limit=limit, "wiki")
+                result = fetch_and_train_markov(topic, limit=limit)
                 st.success(result)
 
     st.markdown("---")
