@@ -1118,7 +1118,7 @@ MARKOV = Markov()
 import requests
 from bs4 import BeautifulSoup
 
-def fetch_and_train_markov(topic: str, limit: int = 5, urlType: str):
+def fetch_and_train_markov(topic: str, limit: int = 5):
     """
     Retrieve text snippets about a topic from the web and train the Markov model.
     Uses Wikipedia as the data source and sklearn for sentence ranking.
@@ -1136,11 +1136,9 @@ def fetch_and_train_markov(topic: str, limit: int = 5, urlType: str):
         if TfidfVectorizer is None:
             return "❌ scikit-learn not available. Install it with 'pip install scikit-learn'."
 
-        # Wikipedia fetch with browser headers
-        if type == "wiki":
+        # Wikipedia 
              url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
-        else:
-             url = f"https://reddit.com/r/{topic.replace(' ', '_')}/"
+        
        
         headers = {
             "User-Agent": (
