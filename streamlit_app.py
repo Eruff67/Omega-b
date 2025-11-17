@@ -1118,7 +1118,7 @@ MARKOV = Markov()
 import requests
 from bs4 import BeautifulSoup
 
-def fetch_and_train_markov(topic: str, limit: int = 5, type):
+def fetch_and_train_markov(topic: str, limit: int = 5, type: str = "wiki"):
     """
     Retrieve text snippets about a topic from the web and train the Markov model.
     Uses Wikipedia as the data source and sklearn for sentence ranking.
