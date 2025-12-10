@@ -1,4 +1,4 @@
-URL: "https://jackaiwillbtravissebai.streamlit.app/"
+URL: "https://omega-b.streamlit.app/"
 
 Do not copy without permission
 
