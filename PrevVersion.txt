@@ -9,6 +9,9 @@ import json, os, re, math, random, uuid, threading
 from datetime import datetime
 from typing import List, Dict, Tuple, Any, Optional
 
+# Cache of already-fetched topics to avoid re-downloading repeatedly
+_fetched_topics_cache = set()
+
 # -------------------------
 # Device-specific isolation (per-device conversations + privacy)
 # -------------------------
@@ -265,11 +268,661 @@ def merged_dictionary() -> Dict[str, Dict[str,Any]]:
 # Compact KB (keeps small for fast startup)
 # -------------------------
 KB = {
-    "capital of france": "Paris.",
-    "what is pi": "Pi (π) ≈ 3.14159.",
-    "what is python": "Python is a high-level programming language.",
-    "who wrote hamlet": "William Shakespeare."
+     # --------------------
+    # Countries & Capitals (common set)
+    # --------------------
+    "capital of afghanistan": "Kabul",
+    "capital of albania": "Tirana",
+    "capital of algeria": "Algiers",
+    "capital of andorra": "Andorra la Vella",
+    "capital of angola": "Luanda",
+    "capital of argentina": "Buenos Aires",
+    "capital of armenia": "Yerevan",
+    "capital of australia": "Canberra",
+    "capital of austria": "Vienna",
+    "capital of azerbaijan": "Baku",
+    "capital of bahamas": "Nassau",
+    "capital of bahrain": "Manama",
+    "capital of bangladesh": "Dhaka",
+    "capital of barbados": "Bridgetown",
+    "capital of belarus": "Minsk",
+    "capital of belgium": "Brussels",
+    "capital of belize": "Belmopan",
+    "capital of benin": "Porto-Novo",
+    "capital of bhutan": "Thimphu",
+    "capital of bolivia": "Sucre (constitutional), La Paz (administrative)",
+    "capital of bosnia and herzegovina": "Sarajevo",
+    "capital of botswana": "Gaborone",
+    "capital of brazil": "Brasília",
+    "capital of brunei": "Bandar Seri Begawan",
+    "capital of bulgaria": "Sofia",
+    "capital of burkina faso": "Ouagadougou",
+    "capital of burundi": "Gitega",
+    "capital of cambodia": "Phnom Penh",
+    "capital of cameroon": "Yaoundé",
+    "capital of canada": "Ottawa",
+    "capital of cape verde": "Praia",
+    "capital of central african republic": "Bangui",
+    "capital of chad": "N'Djamena",
+    "capital of chile": "Santiago",
+    "capital of china": "Beijing",
+    "capital of colombia": "Bogotá",
+    "capital of comoros": "Moroni",
+    "capital of costa rica": "San José",
+    "capital of cote d'ivoire": "Yamoussoukro (official), Abidjan (economic)",
+    "capital of croatia": "Zagreb",
+    "capital of cuba": "Havana",
+    "capital of cyprus": "Nicosia",
+    "capital of czech republic": "Prague",
+    "capital of democratic republic of the congo": "Kinshasa",
+    "capital of denmark": "Copenhagen",
+    "capital of djibouti": "Djibouti",
+    "capital of dominica": "Roseau",
+    "capital of dominican republic": "Santo Domingo",
+    "capital of ecuador": "Quito",
+    "capital of egypt": "Cairo",
+    "capital of el salvador": "San Salvador",
+    "capital of equatorial guinea": "Malabo (planned: Oyala / Ciudad de la Paz)",
+    "capital of eritrea": "Asmara",
+    "capital of estonia": "Tallinn",
+    "capital of eswatini": "Mbabane (administrative), Lobamba (royal/legislative)",
+    "capital of ethiopia": "Addis Ababa",
+    "capital of fiji": "Suva",
+    "capital of finland": "Helsinki",
+    "capital of france": "Paris",
+    "capital of gabon": "Libreville",
+    "capital of gambia": "Banjul",
+    "capital of georgia": "Tbilisi",
+    "capital of germany": "Berlin",
+    "capital of ghana": "Accra",
+    "capital of greece": "Athens",
+    "capital of grenada": "St. George's",
+    "capital of guatemala": "Guatemala City",
+    "capital of guinea": "Conakry",
+    "capital of guinea-bissau": "Bissau",
+    "capital of guyana": "Georgetown",
+    "capital of haiti": "Port-au-Prince",
+    "capital of honduras": "Tegucigalpa",
+    "capital of hungary": "Budapest",
+    "capital of iceland": "Reykjavík",
+    "capital of india": "New Delhi",
+    "capital of indonesia": "Jakarta",
+    "capital of iran": "Tehran",
+    "capital of iraq": "Baghdad",
+    "capital of ireland": "Dublin",
+    "capital of israel": "Jerusalem (disputed; many embassies in Tel Aviv)",
+    "capital of italy": "Rome",
+    "capital of jamaica": "Kingston",
+    "capital of japan": "Tokyo",
+    "capital of jordan": "Amman",
+    "capital of kazakhstan": "Astana (Nur-Sultan formerly)",
+    "capital of kenya": "Nairobi",
+    "capital of kiribati": "South Tarawa",
+    "capital of kosovo": "Pristina",
+    "capital of kuwait": "Kuwait City",
+    "capital of kyrgyzstan": "Bishkek",
+    "capital of laos": "Vientiane",
+    "capital of latvia": "Riga",
+    "capital of lebanon": "Beirut",
+    "capital of lesotho": "Maseru",
+    "capital of liberia": "Monrovia",
+    "capital of libya": "Tripoli",
+    "capital of liechtenstein": "Vaduz",
+    "capital of lithuania": "Vilnius",
+    "capital of luxembourg": "Luxembourg (city)",
+    "capital of madagascar": "Antananarivo",
+    "capital of malawi": "Lilongwe",
+    "capital of malaysia": "Kuala Lumpur (official), Putrajaya (administrative)",
+    "capital of maldives": "Malé",
+    "capital of mali": "Bamako",
+    "capital of malta": "Valletta",
+    "capital of marshall islands": "Majuro",
+    "capital of mauritania": "Nouakchott",
+    "capital of mauritius": "Port Louis",
+    "capital of mexico": "Mexico City",
+    "capital of micronesia": "Palikir",
+    "capital of moldova": "Chișinău",
+    "capital of monaco": "Monaco",
+    "capital of mongolia": "Ulaanbaatar",
+    "capital of montenegro": "Podgorica",
+    "capital of morocco": "Rabat",
+    "capital of mozambique": "Maputo",
+    "capital of myanmar": "Naypyidaw",
+    "capital of namibia": "Windhoek",
+    "capital of nauru": "Yaren (de facto)",
+    "capital of nepal": "Kathmandu",
+    "capital of netherlands": "Amsterdam (constitutional), The Hague (seat of government)",
+    "capital of new zealand": "Wellington",
+    "capital of nicaragua": "Managua",
+    "capital of niger": "Niamey",
+    "capital of nigeria": "Abuja",
+    "capital of north korea": "Pyongyang",
+    "capital of north macedonia": "Skopje",
+    "capital of norway": "Oslo",
+    "capital of oman": "Muscat",
+    "capital of pakistan": "Islamabad",
+    "capital of palau": "Ngerulmud",
+    "capital of panama": "Panama City",
+    "capital of papua new guinea": "Port Moresby",
+    "capital of paraguay": "Asunción",
+    "capital of peru": "Lima",
+    "capital of philippines": "Manila",
+    "capital of poland": "Warsaw",
+    "capital of portugal": "Lisbon",
+    "capital of qatar": "Doha",
+    "capital of romania": "Bucharest",
+    "capital of russia": "Moscow",
+    "capital of rwanda": "Kigali",
+    "capital of saint lucia": "Castries",
+    "capital of samoa": "Apia",
+    "capital of san marino": "San Marino",
+    "capital of sao tome and principe": "São Tomé",
+    "capital of saudi arabia": "Riyadh",
+    "capital of senegal": "Dakar",
+    "capital of serbia": "Belgrade",
+    "capital of seychelles": "Victoria",
+    "capital of sierra leone": "Freetown",
+    "capital of singapore": "Singapore",
+    "capital of slovakia": "Bratislava",
+    "capital of slovenia": "Ljubljana",
+    "capital of solomon islands": "Honiara",
+    "capital of somalia": "Mogadishu",
+    "capital of south africa": "Pretoria (administrative), Cape Town (legislative), Bloemfontein (judicial)",
+    "capital of south korea": "Seoul",
+    "capital of south sudan": "Juba",
+    "capital of spain": "Madrid",
+    "capital of sri lanka": "Sri Jayawardenepura Kotte (official), Colombo (commercial)",
+    "capital of sudan": "Khartoum",
+    "capital of suriname": "Paramaribo",
+    "capital of sweden": "Stockholm",
+    "capital of switzerland": "Bern",
+    "capital of syria": "Damascus",
+    "capital of taiwan": "Taipei",
+    "capital of tajikistan": "Dushanbe",
+    "capital of tanzania": "Dodoma (official), Dar es Salaam (largest city)",
+    "capital of thailand": "Bangkok",
+    "capital of togo": "Lomé",
+    "capital of tonga": "Nukuʻalofa",
+    "capital of trinidad and tobago": "Port of Spain",
+    "capital of tunisia": "Tunis",
+    "capital of turkey": "Ankara",
+    "capital of turkmenistan": "Ashgabat",
+    "capital of tuvalu": "Funafuti",
+    "capital of uganda": "Kampala",
+    "capital of ukraine": "Kyiv",
+    "capital of united arab emirates": "Abu Dhabi",
+    "capital of united kingdom": "London",
+    "capital of united states": "Washington, D.C.",
+    "capital of uruguay": "Montevideo",
+    "capital of uzbekistan": "Tashkent",
+    "capital of vanuatu": "Port Vila",
+    "capital of venezuela": "Caracas",
+    "capital of vietnam": "Hanoi",
+    "capital of yemen": "Sana'a (constitutional), Aden (temporary seat declared)",
+    "capital of zambia": "Lusaka",
+    "capital of zimbabwe": "Harare",
+
+    # --------------------
+    # Planets & solar system
+    # --------------------
+    "how many planets are in the solar system": "Eight (Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune).",
+    "what are the planets": "Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune.",
+    "largest planet": "Jupiter is the largest planet in the solar system.",
+    "smallest planet": "Mercury is the smallest planet in the solar system (among the eight).",
+    "what planet is known as the red planet": "Mars is called the Red Planet.",
+    "which planet has rings": "Saturn is best known for its rings; Jupiter, Uranus, and Neptune also have ring systems.",
+    "what planet is closest to the sun": "Mercury is the closest planet to the Sun.",
+    "what planet is farthest from the sun": "Neptune is the farthest recognized planet from the Sun (Pluto is a dwarf planet).",
+    "what is earth's moon called": "The Moon (sometimes called Luna).",
+    "what is the axis tilt of earth": "Earth's axial tilt is about 23.5 degrees.",
+
+    # --------------------
+    # Foods (common items)
+    # --------------------
+    "apple": "a sweet, edible fruit from the apple tree.",
+    "banana": "a long curved fruit with soft pulpy flesh.",
+    "orange": "a citrus fruit rich in vitamin C.",
+    "bread": "a baked food made from flour and water.",
+    "rice": "a staple grain consumed worldwide.",
+    "pasta": "an Italian noodle made from durum wheat.",
+    "pizza": "a flatbread topped with tomato sauce, cheese, and various toppings.",
+    "cheese": "a dairy product made by coagulating milk proteins.",
+    "milk": "a nutrient-rich liquid produced by mammals.",
+    "egg": "an oval reproductive body laid by birds used as food.",
+    "chicken": "poultry meat commonly eaten worldwide.",
+    "beef": "meat from cattle.",
+    "fish": "edible aquatic vertebrates.",
+    "salad": "a dish of mixed vegetables (sometimes fruits) often served cold.",
+    "sandwich": "food consisting of fillings between slices of bread.",
+    "tomato": "a red edible fruit used as a vegetable in cooking.",
+    "potato": "a starchy tuber eaten worldwide.",
+    "onion": "a pungent bulbous vegetable used for flavoring.",
+    "garlic": "a pungent aromatic used widely in cooking.",
+    "butter": "a dairy product made by churning cream.",
+    "yogurt": "a fermented milk product.",
+    "coffee": "a brewed drink prepared from roasted coffee beans.",
+    "tea": "a beverage made by steeping cured leaves.",
+    "sugar": "a sweet crystalline carbohydrate used as sweetener.",
+    "salt": "a mineral (sodium chloride) used for seasoning and preservation.",
+    "pepper": "a spice (black pepper) used for seasoning.",
+    "lettuce": "a leafy vegetable commonly used in salads.",
+    "carrot": "a root vegetable, usually orange.",
+    "onigiri": "Japanese rice ball, often wrapped in seaweed with a filling.",
+    "avocado": "a creamy green fruit often used in salads and spreads.",
+    "mango": "a tropical stone fruit with sweet flesh.",
+    "strawberry": "a red aggregate fruit with seeds on its exterior.",
+    "blueberry": "a small sweet blue-purple berry.",
+    "grape": "a small round fruit used for eating and wine-making.",
+    "olive": "a small fruit used for oil and as table olives.",
+    "salmon": "a fatty fish often eaten grilled or smoked.",
+    "tuna": "a large saltwater fish commonly used in sushi and cans.",
+    "shrimp": "small crustacean eaten worldwide.",
+    "lobster": "a large marine crustacean served as seafood.",
+    "tofu": "a soy-based protein, common in East Asian cuisines.",
+    "noodles": "long, thin strands of dough used in many cuisines.",
+    "cereal": "processed grain usually eaten for breakfast.",
+    "oats": "a cereal grain used for porridge and baking.",
+    "almond": "an edible tree nut.",
+    "walnut": "a tree nut with brain-like kernel.",
+    "peanut": "a legume often called a nut; used for butter and snacks.",
+    "honey": "a sweet viscous food made by bees.",
+    "olive oil": "oil extracted from olives used in cooking and dressings.",
+    "vinegar": "an acidic liquid used as condiment and preservative.",
+    "mayonnaise": "emulsion of oil, egg yolk and acid used as a spread.",
+    "ketchup": "a sweet-savory tomato-based condiment.",
+    "mustard": "a condiment made from mustard seeds.",
+    "soy sauce": "a salty fermented sauce used in Asian cooking.",
+    "salsa": "a spicy sauce used as a dip or condiment.",
+    "hummus": "a spread made from mashed chickpeas and tahini.",
+    "pancake": "a flat cake cooked on a hot surface, often eaten for breakfast.",
+    "waffle": "a leavened batter cooked between two hot plates to form a patterned surface.",
+    "croissant": "a buttery, flaky, viennoiserie pastry.",
+    "bagel": "a dense bread roll formed into a ring.",
+    "brownie": "a dense chocolate baked dessert.",
+    "cake": "a sweet baked dessert, often frosted for celebrations.",
+    "pie": "a baked dish with filling enclosed in pastry.",
+    "soup": "a primarily liquid food, typically served hot.",
+    "stew": "a dish cooked slowly in liquid, often with meat and vegetables.",
+    "curry": "a dish with a spiced sauce common in South Asian cuisines.",
+    "barbecue": "food cooked or flavored by smoke and grilling.",
+    "burger": "a ground meat patty served in a bun with toppings.",
+    "fries": "deep-fried strips of potato.",
+    "ice cream": "a frozen sweet dairy dessert.",
+    "gelato": "an Italian style ice cream, denser and often lower in fat.",
+    "smoothie": "blended drink made from fruits and often yogurt or milk.",
+
+    # --------------------
+    # Simple recipes / how-to (short)
+    # --------------------
+    "how to boil an egg": "Place egg in boiling water for 6–10 minutes depending on desired firmness; cool in cold water.",
+    "how to cook rice": "Rinse rice, add water (approx. 1:1.5 rice:water by volume), simmer covered until water absorbed (~15–20 min), fluff with fork.",
+    "how to make scrambled eggs": "Whisk eggs, salt, butter in a pan over medium heat, stir until softly set.",
+    "how to make coffee": "Brew ground coffee with hot water using drip, pour-over, French press, or espresso method.",
+    "how to make tea": "Steep tea leaves in near-boiling water 2–5 minutes depending on type, strain and serve.",
+    "how to make salad": "Chop greens and vegetables, toss with dressing, season to taste.",
+    "how to grill a steak": "Season steak, sear over high heat to desired doneness, rest 5 minutes before slicing.",
+    "how to bake bread": "Mix flour, water, yeast, salt, knead, let rise, shape, proof, and bake until golden.",
+    "how to make pancakes": "Mix flour, milk, eggs; pour batter on hot griddle, flip when bubbles form, cook until done.",
+    "how to make sandwich": "Place fillings between two slices of bread, cut and serve.",
+    "how to make pasta": "Boil pasta in salted water until al dente; drain and combine with sauce.",
+    "how to make soup": "Sauté aromatics, add stock and main ingredients, simmer until flavors meld.",
+    "how to roast vegetables": "Toss vegetables with oil and salt, roast at 200°C (400°F) until tender and caramelized.",
+    "how to make guacamole": "Mash avocados, mix with lime juice, salt, chopped onion, cilantro, and tomato.",
+    "how to make hummus": "Blend cooked chickpeas, tahini, lemon juice, garlic, olive oil until smooth.",
+    "how to make omelette": "Beat eggs, pour into hot buttered pan, cook until set, fold with fillings if desired.",
+    "how to make pancakes from scratch": "Combine flour, sugar, baking powder, milk, eggs, melted butter; cook on griddle.",
+
+    # --------------------
+    # Famous people (short descriptors)
+    # --------------------
+    "who is albert einstein": "A theoretical physicist known for the theory of relativity (1879–1955).",
+    "who is isaac newton": "A mathematician and physicist who formulated classical mechanics and gravity (1643–1727).",
+    "who is marie curie": "A physicist and chemist who pioneered research on radioactivity; two-time Nobel laureate.",
+    "who is william shakespeare": "An English playwright and poet from the late 16th/early 17th century.",
+    "who is leonardo da vinci": "An Italian polymath: painter, scientist, and engineer (1452–1519).",
+    "who is nelson mandela": "South African anti-apartheid leader and president (1918–2013).",
+    "who is martin luther king jr": "A leader of the American civil rights movement (1929–1968).",
+    "who is mother teresa": "A Catholic nun and missionary known for charitable work in Kolkata (1910–1997).",
+    "who is mahatma gandhi": "Indian independence leader who promoted nonviolent resistance (1869–1948).",
+    "who is ada lovelace": "Often considered the first computer programmer (1815–1852).",
+    "who is alan turing": "A mathematician and computer science pioneer; codebreaker in WWII (1912–1954).",
+    "who is rosa parks": "Civil rights activist whose refusal to give up her bus seat became a symbol of the movement.",
+    "who is mother jones": "A labor and community organizer known as Mother Jones (1837–1930).",
+    "who is malala yousafzai": "Education activist and youngest Nobel Prize laureate (born 1997).",
+    "who is steve jobs": "Co-founder of Apple Inc., technology entrepreneur (1955–2011).",
+    "who is bill gates": "Co-founder of Microsoft and philanthropist (born 1955).",
+    "who is elon musk": "Entrepreneur behind Tesla, SpaceX, and other ventures (born 1971).",
+    "who is oprah winfrey": "Talk show host, media executive, and philanthropist.",
+    "who is beyonce": "A popular American singer, songwriter, and performer.",
+    "who is taylor swift": "An American singer-songwriter known for pop and country-influenced music.",
+
+    # --------------------
+    # General facts & units
+    # --------------------
+    "what is pi": "Pi (π) ≈ 3.141592653589793, the ratio of a circle's circumference to its diameter.",
+    "how many seconds in a minute": "60 seconds.",
+    "how many minutes in an hour": "60 minutes.",
+    "how many hours in a day": "24 hours.",
+    "how many days in a year": "365 days in a common year; 366 in a leap year.",
+    "what is the speed of light": "Approximately 299,792,458 meters per second in vacuum.",
+    "what is avogadro's number": "Approximately 6.02214076 × 10^23 (particles per mole).",
+    "what is the boiling point of water celsius": "100°C at standard atmospheric pressure (1 atm).",
+    "what is absolute zero": "0 Kelvin (−273.15°C), theoretically the lowest possible temperature.",
+    "what is dna": "Deoxyribonucleic acid, molecule carrying genetic instructions in living organisms.",
+    "what is an atom": "The smallest unit of a chemical element that retains its chemical properties.",
+    "what is photosynthesis": "A process where plants convert sunlight, CO₂ and water into glucose and oxygen.",
+    "what is climate change": "Long-term shifts in temperatures and weather patterns, often driven by human activity.",
+    "what is renewable energy": "Energy from sources that are naturally replenished, like solar, wind, hydro.",
+    "what is socialism": "An economic system where the means of production are owned or regulated by the community.",
+    "what is democracy": "A system of government by the whole population or eligible members, typically via elected representatives.",
+    "what is the human heart": "A muscular organ that pumps blood through the circulatory system.",
+    "what is the largest ocean": "The Pacific Ocean is the largest ocean on Earth.",
+    "what is the tallest mountain": "Mount Everest is the Earth's highest mountain above sea level (~8,848 m).",
+    "what is the largest desert": "The Sahara is the largest hot desert; Antarctica is the largest desert overall.",
+
+    # --------------------
+    # Dates & history (short)
+    # --------------------
+    "when did world war i start": "1914",
+    "when did world war i end": "1918",
+    "when did world war ii start": "1939",
+    "when did world war ii end": "1945",
+    "when was the united nations founded": "1945",
+    "when did man first walk on the moon": "1969 (Apollo 11).",
+
+    # --------------------
+    # Technology & computing
+    # --------------------
+    "what is an api": "Application Programming Interface — a way for programs to communicate.",
+    "what is html": "HyperText Markup Language, used for structuring web pages.",
+    "what is css": "Cascading Style Sheets, used for styling web pages.",
+    "what is javascript": "A programming language commonly used to build interactive websites.",
+    "what is machine learning": "Algorithms that enable systems to learn patterns from data.",
+    "what is artificial intelligence": "Simulation of human intelligence by machines.",
+    "what does cpu stand for": "Central Processing Unit — the primary component that executes instructions in a computer.",
+    "what does gpu stand for": "Graphics Processing Unit — specialized processor for graphics and parallel tasks.",
+
+    # --------------------
+    # Health & biology
+    # --------------------
+    "what is an antibody": "A protein produced by the immune system to neutralize pathogens.",
+    "what is a vaccine": "A biological preparation that provides immunity to a specific disease.",
+    "what is diabetes": "A group of diseases that affect how the body uses blood sugar (glucose).",
+    "what is hypertension": "High blood pressure; a chronic medical condition.",
+    "what is cholesterol": "A waxy substance in blood; high levels can increase heart disease risk.",
+
+    # --------------------
+    # Economics & finance (basic)
+    # --------------------
+    "what is inflation": "A general increase in prices and fall in the purchasing power of money.",
+    "what is gdp": "Gross Domestic Product — the total value of goods and services produced in a country.",
+    "what is a stock": "A share of ownership in a company.",
+
+    # --------------------
+    # Misc short Q/A (useful triggers)
+    # --------------------
+    "how to tie a tie": "Cross the wide end over the narrow, loop, and knot (Windsor/Knot styles vary).",
+    "how to change a tire": "Loosen lug nuts, lift vehicle with jack, remove wheel, replace with spare, tighten nuts.",
+    "how to reset a router": "Unplug power for 10–30 seconds, plug back in, wait for reboot.",
+    "how to take a screenshot": "Use OS-specific shortcuts (e.g., Print Screen on Windows, Cmd+Shift+4 on macOS).",
+    "how to measure a room": "Measure length and width with a tape measure; multiply for area.",
+    "what is the best way to learn a language": "Practice regularly, study vocabulary and grammar, speak with native speakers.",
+    "what is the largest mammal": "The blue whale is the largest mammal.",
+    "what is the fastest land animal": "The cheetah is the fastest land animal over short distances.",
+    "what is renewable energy example": "Solar panels convert sunlight into electricity.",
+    "what is the unit of force": "Newton (N).",
+    "what is the unit of energy": "Joule (J).",
+    "what is the unit of power": "Watt (W).",
+    "what does html stand for": "HyperText Markup Language.",
+    "what does url stand for": "Uniform Resource Locator.",
+    "what is bitcoin": "A decentralized digital currency based on blockchain technology.",
+    "what is a blockchain": "A distributed ledger that records transactions in cryptographic blocks.",
+    "what is the ozone layer": "A region of Earth's stratosphere containing ozone that absorbs much of the sun's UV radiation.",
+
+    # --------------------
+    # Short FAQ-like entries
+    # --------------------
+    "what should i do if my computer is slow": "Restart, check for malware, remove unused programs, free disk space, consider hardware upgrades.",
+    "how to backup data": "Use external drives, cloud storage, or automated backup software to copy important files regularly.",
+    "how to improve sleep": "Keep a consistent schedule, reduce screen time before bed, create a dark comfortable environment.",
+    "what is a balanced diet": "A variety of foods providing adequate macro- and micronutrients: vegetables, fruits, grains, protein, dairy or alternatives.",
+    "how to stay hydrated": "Drink water regularly, especially when active or in hot weather; monitor urine color as rough guide.",
+
+    # --------------------
+    # Travel & geography
+    # --------------------
+    "what is the largest city in the united states": "New York City (by population).",
+    "what is europe's largest country by area": "Russia (partly in Europe), if excluding Russia then Ukraine (or France depending on measure).",
+    "what is the longest river": "The Nile and Amazon are among the longest; sources and measurement methods vary.",
+
+    # --------------------
+    # Education & study
+    # --------------------
+    "how to write an essay": "Plan a structure (intro, body, conclusion), draft, revise, and proofread.",
+    "how to prepare for an exam": "Review notes, practice problems, make a study schedule, get rest before the test.",
+
+    # --------------------
+    # Short troubleshooting/help
+    # --------------------
+    "why won't my phone charge": "Check cable and charger, try different outlet, inspect charging port for debris, try different charger.",
+    "why is my internet slow": "Check router, restart devices, test speed, consider congestion or ISP issues.",
+
+    # --------------------
+    # Placeholder facts (expandable)
+    # --------------------
+    "who was the first president of the united states": "George Washington (1789–1797).",
+    "what is the capital of texas": "Austin.",
+    "what is the capital of california": "Sacramento.",
+    "how many continents are there": "Seven commonly listed continents: Africa, Antarctica, Asia, Europe, North America, Oceania (Australia), South America.",
+    "what is the currency of the united kingdom": "Pound sterling (GBP).",
+    "what is the currency of the european union": "The euro (EUR) for most member states; some member states use other currencies.",
+    "what is the tallest building": "As of many recent records, the Burj Khalifa in Dubai is the tallest building (828 m).",
+
+    # --------------------
+    # Short math helpers
+    # --------------------
+    "what is gcd": "Greatest Common Divisor — the largest integer dividing two numbers without remainder.",
+    "what is lcm": "Least Common Multiple — the smallest positive integer that is a multiple of two numbers.",
+    "what is factorial": "Product of all positive integers up to n, written n! (e.g., 5! = 120).",
+
+    # --------------------
+    # Short language / dictionary-style entries
+    # --------------------
+    "define gravity": "Gravity: a natural phenomenon by which objects with mass attract one another.",
+    "define democracy": "Democracy: government by the people, typically via elected representatives.",
+    "define algorithm": "A step-by-step procedure for calculations or problem-solving.",
+
+    # --------------------
+    # Safety / health quick pointers
+    # --------------------
+    "what to do for minor burn": "Cool under running water for 10–20 minutes, cover with sterile dressing; seek care if severe.",
+    "what to do for sprain": "RICE: Rest, Ice, Compression, Elevation; seek medical attention if severe.",
+
+    # --------------------
+    # Short entertainment / culture facts
+    # --------------------
+    "who wrote 'to kill a mockingbird'": "Harper Lee.",
+    "who painted the mona lisa": "Leonardo da Vinci.",
+
+    # --------------------
+    # End of KB_BIG (add more entries as needed)
+    # --------------------
 }
+
+# ---------- Manual-style big dictionary generator ----------
+def generate_manual_dictionary(min_entries: int = 2000) -> Dict[str, Dict[str,Any]]:
+    """
+    Build a large, high-quality dictionary from curated seeds + safe morphological variants.
+    Returns a dict suitable to merge into BASE_DICT.
+    Use only when user requests (to avoid startup lag).
+    """
+    def examples_for(word, typ):
+        w = word.replace("_", " ")
+        if typ == "noun":
+            return [f"the {w} is on the table.", f"i saw a {w} yesterday."]
+        if typ == "verb":
+            return [f"please {w} carefully.", f"i {w} every day."]
+        if typ == "adj":
+            return [f"that is very {w}.", f"the {w} example."]
+        if typ == "food":
+            return [f"i like {w}.", f"{w} is delicious."]
+        if typ == "place":
+            return [f"i visited {w}.", f"{w} is beautiful."]
+        return [f"{w} example."]
+
+    def make_plural(w):
+        if w.endswith(("s","x","z","ch","sh")): return w + "es"
+        if w.endswith("y") and len(w)>1 and w[-2] not in "aeiou": return w[:-1] + "ies"
+        return w + "s"
+
+    def make_ing(w):
+        if w.endswith("ie"): return w[:-2] + "ying"
+        if w.endswith("e") and not w.endswith("ee"): return w[:-1] + "ing"
+        if len(w)>=3 and (w[-1] not in "aeiou" and w[-2] in "aeiou" and w[-3] not in "aeiou"): return w + w[-1] + "ing"
+        return w + "ing"
+
+    # curated seed lists (real, meaningful words)
+    foods = """apple banana orange bread rice pasta pizza cheese milk egg chicken beef fish shrimp salmon tuna pork lamb bacon tofu yogurt butter honey avocado mango strawberry blueberry grape pear peach plum coconut cherry watermelon cantaloupe kiwi lemon lime grapefruit onion garlic potato tomato carrot cucumber lettuce spinach kale broccoli cauliflower mushroom zucchini eggplant pepper chili corn beans lentils oats quinoa barley rye cereal bagel pancake waffle croissant donut brownie cake pie icecream gelato sorbet toast sandwich burger fries steak tacos burrito sushi sashimi ramen udon pho curry stew soup salad""".split()
+    verbs = """eat drink cook bake boil fry chop slice mix stir serve taste walk run jump drive read write play learn teach think make get take give find see watch listen create build open close start stop continue choose buy sell order deliver order prepare slice dice grill roast sear simmer blend whisk beat fold knead pour measure mix toss marinate""".split()
+    adjectives = """good new old big small large tiny quick slow happy sad bright dark warm cold spicy sweet sour bitter fresh frozen ripe raw cooked crunchy creamy soft hard tender juicy moist dry salty oily""".split()
+    household = """table chair bed sofa lamp fridge stove oven microwave toaster kettle sink bathtub shower mirror curtain blanket pillow towel rug shelf closet drawer""".split()
+    body = """head face eye ear nose mouth neck shoulder arm hand finger thumb wrist elbow chest stomach back hip leg knee ankle foot toe""".split()
+    tech = """computer laptop server router modem smartphone tablet api html css javascript python java c++ rust go typescript node git docker kubernetes linux windows macos database sql nosql json xml api endpoint encryption ssl ai machine learning neural network model algorithm data training inference""".split()
+    places = """paris london rome berlin madrid tokyo beijing washington ottawa canberra moscow delhi beirut cairo bangkok singapore dubai zurich amsterdam lisbon brussels vienna athens prague budapest oslo stockholm helsinki dublin""".split()
+    people = """einstein newton curie shakespeare da_vinci mandela gandhi rosa_parks martin_luther_king ada_lovelace alan_turing jobs gates musk oprah beyonce taylor_swift madonna bob_dylan""" .split()
+    numbers = """one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million billion""".split()
+    daily = """morning afternoon evening night today tomorrow yesterday week month year monday tuesday wednesday thursday friday saturday sunday""".split()
+    connectors = """and or but because however therefore although since while if when where why how also moreover instead besides finally""".split()
+
+    # start building dictionary
+    D = {}
+    def add_word(w, typ="noun", definition=None, examples=None):
+        key = w.lower().replace(" ", "_")
+        if key in D: return
+        if not definition:
+            # short human-like definitions by type
+            if typ == "food":
+                definition = f"a food item: {w.replace('_',' ')}"
+            elif typ == "verb":
+                definition = f"to {w.replace('_',' ')}"
+            elif typ == "adj":
+                definition = f"describes something that is {w.replace('_',' ')}"
+            elif typ == "place":
+                definition = f"a place: {w.replace('_',' ')}"
+            elif typ == "person":
+                definition = f"{w.replace('_',' ').title()}, a notable person (placeholder)."
+            else:
+                definition = f"{w.replace('_',' ')} (noun)"
+        if examples is None:
+            examples = examples_for(w.replace("_"," "), typ)
+        D[key] = {"definition": definition, "type": typ, "examples": examples}
+
+    # add curated sets
+    for f in foods:
+        add_word(f, typ="food", definition=f"A food commonly called {f}.", examples=[f"I like {f}.", f"{f} is delicious."])
+    for v in verbs:
+        add_word(v, typ="verb", definition=f"to {v.replace('_',' ')}", examples=[f"please {v}.", f"i {v} every day."])
+        # add -ing and -ed forms
+        ing = make_ing(v)
+        add_word(ing, typ="verb", definition=f"present participle of {v}", examples=[f"i am {ing}."])
+        ed = v + "ed" if not v.endswith("e") else v + "d"
+        add_word(ed, typ="verb", definition=f"past tense of {v}", examples=[f"i {ed} yesterday."])
+    for a in adjectives:
+        add_word(a, typ="adj", definition=f"{a} (adjective).", examples=[f"that is very {a}."])
+    for h in household:
+        add_word(h, typ="noun", definition=f"{h} (household item).", examples=[f"the {h} is in the room."])
+    for b in body:
+        add_word(b, typ="noun", definition=f"{b} (body part).", examples=[f"my {b} hurts."])
+    for t in tech:
+        add_word(t, typ="tech", definition=f"{t} (technology/term).", examples=[f"i used {t} today."])
+    for p in places:
+        add_word(p, typ="place", definition=f"{p.replace('_',' ').title()}, a city/place.", examples=[f"I visited {p}."])
+    for n in numbers:
+        add_word(n, typ="number", definition=f"{n} (number word).", examples=[f"{n} is a number."])
+    for c in connectors:
+        add_word(c, typ="conjunction", definition=f"{c} (connector word).", examples=[f"this is {c} an example."])
+    for pe in people:
+        add_word(pe, typ="person", definition=f"{pe.replace('_',' ').title()}, notable person (short).", examples=[f"{pe.replace('_',' ').title()} was notable."])
+    for d in daily:
+        add_word(d, typ="time", definition=f"{d} (time-related).", examples=[f"{d} is a day name."])
+
+    # add capital cities (select larger list manually)
+    capitals = {
+        "afghanistan":"kabul","albania":"tirana","algeria":"algiers","andorra":"andorra_la_vella","angola":"luanda",
+        "argentina":"buenos_aires","armenia":"yerevan","australia":"canberra","austria":"vienna","azerbaijan":"baku",
+        "bahamas":"nassau","bahrain":"manama","bangladesh":"dhaka","barbados":"bridgetown","belarus":"minsk",
+        "belgium":"brussels","belize":"belmopan","benin":"porto-novo","bhutan":"thimphu","bolivia":"sucre",
+        "bosnia_and_herzegovina":"sarajevo","botswana":"gaborone","brazil":"brasilia","brunei":"bandar_seri_begawan",
+        "bulgaria":"sofia","burkina_faso":"ouagadougou","burundi":"gitega","cambodia":"phnom_penh","cameroon":"yaounde",
+        "canada":"ottawa","cape_verde":"praia","central_african_republic":"bangui","chad":"n_djamena","chile":"santiago",
+        "china":"beijing","colombia":"bogota","comoros":"moroni","costa_rica":"san_jose","croatia":"zagreb","cuba":"havana",
+        "cyprus":"nicosia","czech_republic":"prague","democratic_republic_of_the_congo":"kinshasa","denmark":"copenhagen",
+        "djibouti":"djibouti","dominica":"roseau","dominican_republic":"santo_domingo","ecuador":"quito","egypt":"cairo",
+        "el_salvador":"san_salvador","equatorial_guinea":"malabo","eritrea":"asmara","estonia":"tallinn","eswatini":"mbabane",
+        "ethiopia":"addis_ababa","fiji":"suva","finland":"helsinki","france":"paris","gabon":"libreville","gambia":"banjul",
+        "georgia":"tbilisi","germany":"berlin","ghana":"accra","greece":"athens","grenada":"st_georges","guatemala":"guatemala_city",
+        "guinea":"conakry","guinea_bissau":"bissau","guyana":"georgetown","haiti":"port_au_prince","honduras":"tegucigalpa",
+        "hungary":"budapest","iceland":"reykjavik","india":"new_delhi","indonesia":"jakarta","iran":"tehran","iraq":"baghdad",
+        "ireland":"dublin","israel":"jerusalem","italy":"rome","jamaica":"kingston","japan":"tokyo","jordan":"amman",
+        "kazakhstan":"astana","kenya":"nairobi","kiribati":"south_tarawa","kosovo":"pristina","kuwait":"kuwait_city",
+        "kyrgyzstan":"bishkek","laos":"vientiane","latvia":"riga","lebanon":"beirut","lesotho":"maseru","liberia":"monrovia",
+        "libya":"tripoli","liechtenstein":"vaduz","lithuania":"vilnius","luxembourg":"luxembourg","madagascar":"antananarivo",
+        "malawi":"lilongwe","malaysia":"kuala_lumpur","maldives":"male","mali":"bamako","malta":"valletta","marshall_islands":"majuro",
+        "mauritania":"nouakchott","mauritius":"port_louis","mexico":"mexico_city","micronesia":"palikir","moldova":"chisinau",
+        "monaco":"monaco","mongolia":"ulaanbaatar","montenegro":"podgorica","morocco":"rabat","mozambique":"maputo",
+        "myanmar":"naypyidaw","namibia":"windhoek","nauru":"yaren","nepal":"kathmandu","netherlands":"amsterdam",
+        "new_zealand":"wellington","nicaragua":"managua","niger":"niamey","nigeria":"abuja","north_korea":"pyongyang",
+        "north_macedonia":"skopje","norway":"oslo","oman":"muscat","pakistan":"islamabad","palau":"ngerulmud",
+        "panama":"panama_city","papua_new_guinea":"port_moresby","paraguay":"asuncion","peru":"lima","philippines":"manila",
+        "poland":"warsaw","portugal":"lisbon","qatar":"doha","romania":"bucharest","russia":"moscow","rwanda":"kigali",
+        "saint_lucia":"castries","samoa":"apia","san_marino":"san_marino","sao_tome_and_principe":"sao_tome","saudi_arabia":"riyadh",
+        "senegal":"dakar","serbia":"belgrade","seychelles":"victoria","sierra_leone":"freetown","singapore":"singapore_city",
+        "slovakia":"bratislava","slovenia":"ljubljana","solomon_islands":"honiara","somalia":"mogadishu","south_africa":"pretoria",
+        "south_korea":"seoul","south_sudan":"juba","spain":"madrid","sri_lanka":"colombo","sudan":"khartoum","suriname":"paramaribo",
+        "sweden":"stockholm","switzerland":"bern","syria":"damascus","taiwan":"taipei","tajikistan":"dushanbe","tanzania":"dodoma",
+        "thailand":"bangkok","togo":"lome","tonga":"nukualofa","trinidad_and_tobago":"port_of_spain","tunisia":"tunis","turkey":"ankara",
+        "turkmenistan":"ashgabat","tuvalu":"funafuti","uganda":"kampala","ukraine":"kyiv","united_arab_emirates":"abu_dhabi",
+        "united_kingdom":"london","united_states":"washington_dc","uruguay":"montevideo","uzbekistan":"tashkent","vanuatu":"port_vila",
+        "venezuela":"caracas","vietnam":"hanoi","yemen":"sana_a","zambia":"lusaka","zimbabwe":"harare"
+    }
+    for country,cap in capitals.items():
+        add_word(country, typ="place", definition=f"{country.replace('_',' ').title()} (country).", examples=[f"I traveled to {country.replace('_',' ')}."])
+        add_word(cap, typ="place", definition=f"{cap.replace('_',' ').title()} (capital city).", examples=[f"{cap.replace('_',' ').title()} is the capital."])
+
+    # combine seeds to reach size by adding morphological variants of curated words
+    keys_list = list(D.keys())
+    idx = 0
+    while len(D) < min_entries and idx < len(keys_list)*10:
+        base = keys_list[idx % len(keys_list)]
+        idx += 1
+        # try to add plural or -ing or small derived forms
+        if D[base]["type"] in ("noun","food","place","person"):
+            p = make_plural(base)
+            add_word(p, typ=D[base]["type"], definition=f"plural of {base.replace('_',' ')}", examples=[f"the {p.replace('_',' ')} are here."])
+        if D[base]["type"] == "verb":
+            ing = make_ing(base)
+            add_word(ing, typ="verb", definition=f"{ing} (present participle)", examples=[f"i am {ing.replace('_',' ')}."])
+            ed = base + "ed" if not base.endswith("e") else base + "d"
+            add_word(ed, typ="verb", definition=f"{ed} (past tense)", examples=[f"i {ed.replace('_',' ')} yesterday."])
+        # also add some compound nouns from adjective+noun
+        if D[base]["type"] in ("adj","noun"):
+            # choose a random noun to pair
+            other = random.choice(list(D.keys()))
+            if D[other]["type"] in ("noun","food","place"):
+                comp = base + "_" + other
+                add_word(comp, typ="noun", definition=f"a {base.replace('_',' ')} {other.replace('_',' ')}", examples=[f"the {comp.replace('_',' ')} was useful."])
+        # refresh keys list occasionally
+        if idx % 500 == 0:
+            keys_list = list(D.keys())
+    # final safety: ensure at least min_entries by adding synthetic readable fillers
+    cntr = 1
+    while len(D) < min_entries:
+        key = f"term_manual_{cntr}"
+        if key not in D:
+            D[key] = {"definition": f"manual filler term {cntr}", "type":"auto", "examples":[f"{key.replace('_',' ')} example."]}
+        cntr += 1
+
+    return D
 
 # -------------------------
 # Lightweight vectorizer & vocab builder (on demand)
@@ -459,6 +1112,80 @@ class Markov:
 
 MARKOV = Markov()
 
+# -------------------------
+# Fetch & train Markov from the web using sklearn TF-IDF
+# -------------------------
+import requests
+from bs4 import BeautifulSoup
+
+def fetch_and_train_markov(topic: str, limit: int = 5):
+    """
+    Retrieve text snippets about a topic from the web and train the Markov model.
+    Uses Wikipedia as the data source and sklearn for sentence ranking.
+
+    Auto-skips topics already fetched (cached in _fetched_topics_cache).
+    """
+    try:
+        global _fetched_topics_cache
+        topic = topic.strip().lower()
+        if not topic:
+            return "⚠️ Empty topic provided."
+        if topic in _fetched_topics_cache:
+            return f"(cached) Markov already trained on '{topic}'."
+
+        if TfidfVectorizer is None:
+            return "❌ scikit-learn not available. Install it with 'pip install scikit-learn'."
+
+        # Wikipedia 
+        url = f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"
+        
+       
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0 Safari/537.36"
+            )
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return f"⚠️ Couldn't retrieve content for '{topic}' (HTTP {r.status_code})."
+
+        # Extract visible text
+        soup = BeautifulSoup(r.text, "html.parser")
+        paragraphs = [p.get_text() for p in soup.find_all("p")]
+        text = " ".join(paragraphs)
+        text = re.sub(r"\s+", " ", text).strip()
+
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        if not sentences or len(sentences) < 3:
+            return f"No usable text found for '{topic}'."
+
+        vect = TfidfVectorizer(stop_words="english", max_features=5000)
+        X = vect.fit_transform(sentences)
+        scores = X.sum(axis=1).A.flatten()
+        top_indices = scores.argsort()[::-1][:limit]
+        top_sentences = [sentences[i] for i in top_indices if len(sentences[i].split()) > 4]
+
+        for s in top_sentences:
+            MARKOV.train(s)
+
+        # Remember we’ve seen this topic
+        _fetched_topics_cache.add(topic)
+
+        try:
+            ser = {"starts": MARKOV.starts,
+                   "map": {f"{a}||{b}": nxts for (a,b), nxts in MARKOV.map.items()}}
+            save_json(MARKOV_FILE, ser)
+        except Exception:
+            pass
+
+        return f"✅ Markov trained with {len(top_sentences)} sentences about '{topic}'."
+
+    except Exception as e:
+        return f"⚠️ Error during fetch_and_train_markov: {e}"
+        
+
 def load_markov_if_exists():
     ser = load_json(MARKOV_FILE, None)
     if ser and isinstance(ser, dict) and "map" in ser:
@@ -472,6 +1199,7 @@ def load_markov_if_exists():
         MARKOV.map = m
         return True
     return False
+
 
 # try load persisted markov (fast path) — if available we avoid rebuilding
 _markov_loaded = load_markov_if_exists()
@@ -509,10 +1237,232 @@ SEED_EXAMPLES = [
     ("what is gravity", "fact"),
     ("who was the first president of the united states", "fact"),
     ("define gravity", "define"),
+    ("what is the meaning of gravity", "define"),
     ("calculate 12 * 7", "math"),
     ("what time is it", "time"),
     ("what is today's date", "date"),
+    ("x means y", "teach"),
+    ("gravity means a force", "teach"),
+    ("hello how are you", "chat"),
     ("tell me a story", "chat"),
+    ("who was abraham lincoln", "fact"),
+    ("define python", "define"),
+    ("what is photosynthesis", "fact"),
+    ("who wrote hamlet", "fact"),
+    ("what is pi", "fact"),
+    ("what is the capital of france", "fact"),
+    ("how many centimeters in a meter", "fact"),
+    ("convert 5 miles to kilometers", "math"),
+    ("what's the weather like", "chat"),
+    ("say hello", "chat"),
+    ("define entropy", "define"),
+    ("explain photosynthesis", "fact"),
+    ("what does dna stand for", "fact"),
+    ("calculate 3^4", "math"),
+    ("what's 45 divided by 9", "math"),
+    ("how many minutes in a day", "fact"),
+    ("what year did world war two end", "fact"),
+    ("define democracy", "define"),
+    ("who is marie curie", "fact"),
+    ("what is the speed of light", "fact"),
+    ("tell me a joke", "chat"),
+    ("how to boil an egg", "fact"),
+    ("teach me 'ubiquitous' meaning", "teach"),
+    ("ubiquitous means present everywhere", "teach"),
+    ("what time is it in tokyo", "time"),
+    ("what date is it tomorrow", "date"),
+    ("what is the capital of japan", "fact"),
+    ("how many ounces in a pound", "fact"),
+    ("calculate the area of a circle with radius 3", "math"),
+    ("define algorithm", "define"),
+    ("explain machine learning simply", "fact"),
+    ("who discovered penicillin", "fact"),
+    ("what is a black hole", "fact"),
+    ("how many days until new year", "date"),
+    ("what is the meaning of life", "chat"),
+    ("define 'heuristic'", "define"),
+    ("42 * 7", "math"),
+    ("what's the time in new york", "time"),
+    ("when is the next solar eclipse", "fact"),
+    ("what is the capital of canada", "fact"),
+    ("teach pasta: a type of noodle", "teach"),
+    ("pasta means an Italian noodle", "teach"),
+    ("what's 2+2", "math"),
+    ("calculate 100 / 25", "math"),
+    ("define photosynthesis", "define"),
+    ("what causes tides", "fact"),
+    ("who wrote pride and prejudice", "fact"),
+    ("explain relativity in a sentence", "fact"),
+    ("what is an atom", "fact"),
+    ("how to make a sandwich", "fact"),
+    ("teach 'serendipity' means fortunate discovery", "teach"),
+    ("what is the capital of italy", "fact"),
+    ("what time zone is london in", "fact"),
+    ("what's today's date in yyyy-mm-dd", "date"),
+    ("define 'metaphor'", "define"),
+    ("how many weeks in a year", "fact"),
+    ("multiply 17 by 3", "math"),
+    ("what is quantum mechanics", "fact"),
+    ("who painted the mona lisa", "fact"),
+    ("explain blockchain briefly", "fact"),
+    ("what is photosynthesis used for", "fact"),
+    ("teach carrot means an orange vegetable", "teach"),
+    ("carrot means a root vegetable", "teach"),
+    ("what's 9 to the power of 3", "math"),
+    ("convert 100 celsius to fahrenheit", "math"),
+    ("what's the capital of australia", "fact"),
+    ("what time is it in sydney", "time"),
+    ("define 'symbiosis'", "define"),
+    ("tell me a short poem", "chat"),
+    ("who invented the telephone", "fact"),
+    ("how many planets are in the solar system", "fact"),
+    ("is pluto a planet", "fact"),
+    ("what is a prime number", "fact"),
+    ("calculate gcd of 24 and 36", "math"),
+    ("what's the date of independence day in the usa", "date"),
+    ("define 'ecosystem'", "define"),
+    ("what is the capital of india", "fact"),
+    ("teach 'ramen means Japanese noodle soup'", "teach"),
+    ("ramen means Japanese noodle soup", "teach"),
+    ("how long does it take to boil potatoes", "fact"),
+    ("what is an ecosystem", "fact"),
+    ("who was nelson mandela", "fact"),
+    ("what does 'CPU' stand for", "fact"),
+    ("calculate square root of 256", "math"),
+    ("what time zone is tokyo", "fact"),
+    ("what day of week is 2025-01-01", "date"),
+    ("define 'metabolism'", "define"),
+    ("how to cook rice", "fact"),
+    ("who invented electricity", "fact"),
+    ("tell me something interesting", "chat"),
+    ("teach 'sushi means vinegared rice with fish'", "teach"),
+    ("sushi means vinegared rice with fish", "teach"),
+    ("what is the capital of russia", "fact"),
+    ("what causes seasons", "fact"),
+    ("what is the largest ocean", "fact"),
+    ("how many bones in the human body", "fact"),
+    ("calculate 7 factorial", "math"),
+    ("what is the boiling point of water", "fact"),
+    ("define 'gravity'", "define"),
+    ("what is an API", "fact"),
+    ("who is the current president of the united states", "fact"),
+    ("when was the internet invented", "fact"),
+    ("how many bytes in a kilobyte", "fact"),
+    ("what is 0 divided by 0", "math"),
+    ("teach 'avocado means creamy green fruit'", "teach"),
+    ("avocado means a creamy green fruit", "teach"),
+    ("how to make coffee", "fact"),
+    ("what is the capital of brazil", "fact"),
+    ("what is photosynthesis equation", "fact"),
+    ("who discovered america", "fact"),
+    ("tell me a fun fact about space", "chat"),
+    ("define 'photosynthesis' in one line", "define"),
+    ("what's 123 * 456", "math"),
+    ("what time is it in UTC", "time"),
+    ("when is daylight saving time", "fact"),
+    ("what's the capital of germany", "fact"),
+    ("teach 'tofu means soy curd product'", "teach"),
+    ("tofu means soy curd product", "teach"),
+    ("how to bake bread", "fact"),
+    ("what is a continent", "fact"),
+    ("who was albert einstein", "fact"),
+    ("explain evolution", "fact"),
+    ("what's the population of china", "fact"),
+    ("what is machine learning", "fact"),
+    ("calculate 3.14159 * 2", "math"),
+    ("what is the capital of spain", "fact"),
+    ("define 'molecule'", "define"),
+    ("how to tie a tie", "fact"),
+    ("teach 'omelette means beaten eggs cooked in a pan'", "teach"),
+    ("omelette means beaten eggs cooked in a pan", "teach"),
+    ("what is the capital of mexico", "fact"),
+    ("how many teeth does an adult human have", "fact"),
+    ("what is the currency of japan", "fact"),
+    ("convert 10 usd to eur", "math"),
+    ("what is a black hole in simple terms", "fact"),
+    ("who wrote the odyssey", "fact"),
+    ("define 'photosphere'", "define"),
+    ("how far is the moon", "fact"),
+    ("what is the capital of china", "fact"),
+    ("teach 'bagel means a dense bread ring'", "teach"),
+    ("bagel means a dense bread ring", "teach"),
+    ("how to make pancakes", "fact"),
+    ("what is the difference between a comet and an asteroid", "fact"),
+    ("what is an electron", "fact"),
+    ("calculate 2^10", "math"),
+    ("what date is easter next year", "date"),
+    ("who discovered penicillin", "fact"),
+    ("what's the capital of south africa", "fact"),
+    ("define 'neuron'", "define"),
+    ("how many calories in an apple", "fact"),
+    ("how to make a salad", "fact"),
+    ("teach 'quinoa means a seed used as a grain'", "teach"),
+    ("quinoa means a seed used as a grain", "teach"),
+    ("what's the square of 15", "math"),
+    ("what time does the stock market open", "fact"),
+    ("who painted starry night", "fact"),
+    ("what is the tallest mountain", "fact"),
+    ("calculate the hypotenuse of a right triangle with legs 3 and 4", "math"),
+    ("what is the capital of egypt", "fact"),
+    ("define 'antibody'", "define"),
+    ("how to make tea", "fact"),
+    ("who is the author of '1984'", "fact"),
+    ("what is the nearest star to earth", "fact"),
+    ("teach 'latte means espresso with steamed milk'", "teach"),
+    ("latte means espresso with steamed milk", "teach"),
+    ("how many liters in a gallon", "math"),
+    ("what is the capital of argentina", "fact"),
+    ("what's the meaning of 'ephemeral'", "define"),
+    ("tell me an inspirational quote", "chat"),
+    ("who invented the lightbulb", "fact"),
+    ("what is an algorithm", "fact"),
+    ("calculate 2 + 2 * 2", "math"),
+    ("what day of week is 2025-12-25", "date"),
+    ("define 'isotope'", "define"),
+    ("how to make soup", "fact"),
+    ("what is the capital of portugal", "fact"),
+    ("who wrote 'to kill a mockingbird'", "fact"),
+    ("what does 'HTTP' stand for", "fact"),
+    ("teach 'gazpacho means cold Spanish soup'", "teach"),
+    ("gazpacho means cold Spanish soup", "teach"),
+    ("how many states are in the usa", "fact"),
+    ("what's the escape velocity of earth", "fact"),
+    ("define 'covalent bond'", "define"),
+    ("calculate 10 factorial", "math"),
+    ("what time is sunrise today", "time"),
+    ("who discovered electricity", "fact"),
+    ("what is the capital of sweden", "fact"),
+    ("what causes lightning", "fact"),
+    ("teach 'salsa means sauce in Spanish'", "teach"),
+    ("salsa means sauce in Spanish", "teach"),
+    ("how to roast vegetables", "fact"),
+    ("what is the human genome", "fact"),
+    ("who wrote 'the great gatsby'", "fact"),
+    ("define 'polymer'", "define"),
+    ("calculate 0.25 * 4", "math"),
+    ("what is the capital of norway", "fact"),
+    ("how many moons does jupiter have", "fact"),
+    ("what is renewable energy", "fact"),
+    ("teach 'espresso means concentrated coffee'", "teach"),
+    ("espresso means concentrated coffee", "teach"),
+    ("how long to grill chicken", "fact"),
+    ("what's the date today", "date"),
+    ("what's 5 to the power of 3", "math"),
+    ("define 'taxonomy'", "define"),
+    ("who is the author of the iliad", "fact"),
+    ("what's the capital of poland", "fact"),
+    ("how to make guacamole", "fact"),
+    ("teach 'sashimi means sliced raw fish'", "teach"),
+    ("sashimi means sliced raw fish", "teach"),
+    ("what is biodiversity", "fact"),
+    ("calculate the perimeter of a rectangle 5 by 8", "math"),
+    ("what time is it in berlin", "time"),
+    ("who invented the printing press", "fact"),
+    ("define 'osmosis'", "define"),
+    ("what is the capital of greece", "fact"),
+    ("how to ferment yogurt", "fact"),
+    ("teach 'bento means Japanese boxed meal'", "teach"),
+    ("bento means Japanese boxed meal", "teach")
 ]
 
 def build_and_train_model(force: bool=False):
@@ -524,9 +1474,11 @@ def build_and_train_model(force: bool=False):
     dataset = []
     for text,intent in SEED_EXAMPLES:
         dataset.append((text_to_vector(text, VOCAB), INTENTS.index(intent)))
+        
     for k,v in ai_state.get("learned", {}).items():
         phrase = f"{k} means {v.get('definition','')}"
         dataset.append((text_to_vector(phrase, VOCAB), INTENTS.index("teach")))
+        
     if dataset:
         NN_MODEL.train(dataset, epochs=6, lr=0.06)
     # sample Markov training to be fast
@@ -781,12 +1733,22 @@ def compose_reply(user_text: str, topic: Optional[str]=None, paragraph_sentences
             return respond(para, {"intent":"gen_paragraph"})
     # markov single generation
     gen = MARKOV.generate(seed=user)
+    if not gen or len(gen.split()) < 4:
+        # Auto-fetch: if generation failed or seems too short, try web training
+        topic_guess = re.sub(r"[^a-zA-Z0-9\s]", "", user).strip().split()
+        if topic_guess:
+            topic_guess = topic_guess[-1]  # use last word as rough topic
+            fetch_result = fetch_and_train_markov(topic_guess, limit=8)
+            print("[auto-fetch]", fetch_result)
+            gen = MARKOV.generate(seed=user, max_words=50)
+
     if gen:
         if re.search(r"[\.!\?]\s*$", user):
             reply_text = gen
-        else:
-            reply_text = (user.rstrip() + " " + gen).strip()
-        return respond(reply_text, {"intent":"gen"})
+    else:
+        reply_text = (user.rstrip() + " " + gen).strip()
+    return respond(reply_text, {"intent":"gen"})
+
     return respond("I don't know that yet. Teach me with 'X means Y' or '/define X: Y'.", {"intent":"unknown"})
 
 # -------------------------
@@ -871,27 +1833,12 @@ with right:
     st.markdown("This app defers heavy work to you. Click buttons below when you want the big dictionary or a model rebuild.")
     if st.button("Load full dictionary (generate or load dictionary.json)"):
         # if dictionary file exists, load it; otherwise generate and save
-        if os.path.exists(DICT_FILE):
-            try:
-                big = load_json(DICT_FILE, None)
-                if isinstance(big, dict) and len(big) > 1000:
-                    BASE_DICT.update({k:v for k,v in big.items()})
-                    st.success(f"Loaded dictionary.json with {len(big)} entries.")
-                else:
-                    st.warning("dictionary.json exists but looks small or invalid; regenerating.")
-                    with st.spinner("Generating large dictionary (one-time): this may take a few seconds..."):
-                        big = generate_large_dictionary(min_entries=2000)
-                        save_json(DICT_FILE, big)
-                        BASE_DICT.update({k:v for k,v in big.items()})
-                        st.success(f"Generated and saved dictionary.json with {len(big)} entries.")
-            except Exception as e:
-                st.error(f"Failed to load dictionary.json: {e}")
-        else:
-            with st.spinner("Generating large dictionary (one-time): this may take a few seconds..."):
-                big = generate_large_dictionary(min_entries=2000)
-                save_json(DICT_FILE, big)
-                BASE_DICT.update({k:v for k,v in big.items()})
-                st.success(f"Generated and saved dictionary.json with {len(big)} entries.")
+        
+        with st.spinner("Generating large dictionary (one-time): this may take a few seconds..."):
+             big = generate_manual_dictionary(min_entries=2000)
+             save_json(DICT_FILE, big)
+             BASE_DICT.update({k:v for k,v in big.items()})
+             st.success(f"Generated and saved dictionary.json with {len(big)} entries.")
         # Mark model dirty to reflect new vocab and rebuild semantic index in background
         ai_state["model_dirty"] = True; save_json(STATE_FILE, ai_state)
         threading.Thread(target=rebuild_semantic_index).start()
@@ -914,6 +1861,14 @@ with right:
             rebuild_semantic_index(force=True)
             st.success("Semantic model rebuilt.")
             st.rerun()
+    st.markdown("---")
+    st.header("Web Markov Trainer")
+    topic = st.text_input("Train Markov using Wikipedia topic:", "cats")
+    limit = st.slider("Number of sentences to use", 3, 15, 6)
+    if st.button("Fetch & Train from Web"):
+            with st.spinner(f"Fetching and training on '{topic}'..."):
+                result = fetch_and_train_markov(topic, limit=limit)
+                st.success(result)
 
     st.markdown("---")
     st.write("Persisted Markov: " + ("loaded" if _markov_loaded else "not found"))
