@@ -1180,10 +1180,54 @@ def fetch_and_train_markov(topic: str, limit: int = 5):
         except Exception:
             pass
 
+        url = f"https://www.google.com/search?q={topic.replace(' ', '_')}"
+        
+       
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0 Safari/537.36"
+            )
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code != 200:
+            return f"⚠️ Couldn't retrieve content for '{topic}' (HTTP {r.status_code})."
+
+        # Extract visible text
+        soup = BeautifulSoup(r.text, "html.parser")
+        paragraphs = [p.get_text() for p in soup.find_all("p")]
+        text = " ".join(paragraphs)
+        text = re.sub(r"\s+", " ", text).strip()
+
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        if not sentences or len(sentences) < 3:
+            return f"No usable text found for '{topic}'."
+
+        vect = TfidfVectorizer(stop_words="english", max_features=5000)
+        X = vect.fit_transform(sentences)
+        scores = X.sum(axis=1).A.flatten()
+        top_indices = scores.argsort()[::-1][:limit]
+        top_sentences = [sentences[i] for i in top_indices if len(sentences[i].split()) > 4]
+
+        for s in top_sentences:
+            MARKOV.train(s)
+
+        # Remember we’ve seen this topic
+        _fetched_topics_cache.add(topic)
+
+        try:
+            ser = {"starts": MARKOV.starts,
+                   "map": {f"{a}||{b}": nxts for (a,b), nxts in MARKOV.map.items()}}
+            save_json(MARKOV_FILE, ser)
+        except Exception:
+            pass
+
         return f"✅ Markov trained with {len(top_sentences)} sentences about '{topic}'."
 
     except Exception as e:
         return f"⚠️ Error during fetch_and_train_markov: {e}"
+        
 
 def load_markov_if_exists():
     ser = load_json(MARKOV_FILE, None)
